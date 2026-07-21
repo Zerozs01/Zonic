@@ -1,0 +1,33 @@
+:root {
+  --bg-primary: #0b0f19;
+  --bg-secondary: #111827;
+  --bg-card: rgba(17, 24, 39, 0.75);
+  --accent-cyan: #00f2fe;
+  --accent-blue: #4facfe;
+  --accent-purple: #7f53ac;
+  --accent-pink: #647eee;
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  overflow-x: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Outfit', sans-serif;
+}
