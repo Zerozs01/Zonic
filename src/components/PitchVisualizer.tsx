@@ -3,8 +3,8 @@ import { LoadedTrack, PitchFrame } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
 interface PitchVisualizerProps {
-  vocalTrack: LoadedTrack | null;
-  referenceTrack: LoadedTrack | null;
+  vocalRefTrack: LoadedTrack | null;
+  instrumentalTrack: LoadedTrack | null;
   currentTimeSec: number;
   durationSec: number;
   onSeek: (timeSec: number) => void;
@@ -24,8 +24,8 @@ const SCALE_NOTES = [
 ];
 
 export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
-  vocalTrack,
-  referenceTrack,
+  vocalRefTrack,
+  instrumentalTrack,
   currentTimeSec,
   durationSec,
   onSeek,
@@ -36,24 +36,48 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [zoomLevel, setZoomLevel] = useState<number>(1); // 1x to 5x
-  const [scrollOffsetSec, setScrollOffsetSec] = useState<number>(0);
+  const scrollOffsetSec = Math.max(0, currentTimeSec - (durationSec / zoomLevel) / 2);
   const isDraggingRef = useRef<boolean>(false);
 
-  // Live pitch trail for microphone stream
-  const livePitchHistoryRef = useRef<{ timeSec: number; hz: number }[]>([]);
+  // Live pitch history for live mic input with target pitch color coding
+  const livePitchHistoryRef = useRef<{ timeSec: number; hz: number; color: string }[]>([]);
 
   useEffect(() => {
-    if (isRecording && liveMicFrame && liveMicFrame.is_voiced) {
+    if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
+      // Find reference target pitch at current time
+      let targetHz = 0;
+      if (vocalRefTrack?.analysis?.pitch_frames) {
+        const frames = vocalRefTrack.analysis.pitch_frames;
+        const frameIdx = Math.floor((currentTimeSec * 1000) / 10); // 10ms hop
+        if (frameIdx >= 0 && frameIdx < frames.length) {
+          const refFrame = frames[frameIdx];
+          if (refFrame.is_voiced) targetHz = refFrame.frequency_hz;
+        }
+      }
+
+      let pointColor = '#00f2fe'; // Default cyan
+      if (targetHz > 0) {
+        const centsOffset = Math.abs(1200 * Math.log2(liveMicFrame.frequency_hz / targetHz));
+        if (centsOffset <= 20) {
+          pointColor = '#10b981'; // 🟢 Green (In-Tune)
+        } else if (centsOffset <= 45) {
+          pointColor = '#f59e0b'; // 🟠 Orange (Slightly off)
+        } else {
+          pointColor = '#ef4444'; // 🔴 Red (Off-pitch)
+        }
+      }
+
       livePitchHistoryRef.current.push({
         timeSec: currentTimeSec,
         hz: liveMicFrame.frequency_hz,
+        color: pointColor,
       });
-      // Keep last 30 seconds of live pitch
-      if (livePitchHistoryRef.current.length > 3000) {
+
+      if (livePitchHistoryRef.current.length > 2000) {
         livePitchHistoryRef.current.shift();
       }
     }
-  }, [liveMicFrame, currentTimeSec, isRecording]);
+  }, [liveMicFrame, currentTimeSec, vocalRefTrack]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -140,20 +164,16 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       }
     }
 
-    // Helper to draw Pitch Curve
-    const drawPitchCurve = (
-      frames: PitchFrame[],
-      color: string,
-      glowColor: string,
-      lineWidth: number
-    ) => {
-      ctx.shadowColor = glowColor;
+    // 1. Draw Original Vocal Guide Pitch Contour (Violet)
+    if (vocalRefTrack?.analysis?.pitch_frames) {
+      ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
       ctx.shadowBlur = 8;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 3;
       ctx.beginPath();
 
       let inPath = false;
+      const frames = vocalRefTrack.analysis.pitch_frames;
 
       for (let i = 0; i < frames.length; i++) {
         const f = frames[i];
@@ -180,61 +200,33 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
         }
       }
 
-      if (inPath) {
-        ctx.stroke();
-      }
+      if (inPath) ctx.stroke();
       ctx.shadowBlur = 0;
-    };
-
-    // 1. Draw Reference Track Pitch Curve (Violet)
-    if (referenceTrack?.analysis?.pitch_frames) {
-      drawPitchCurve(
-        referenceTrack.analysis.pitch_frames,
-        '#a855f7',
-        'rgba(168, 85, 247, 0.6)',
-        3
-      );
     }
 
-    // 2. Draw User Vocal Track Pitch Curve (Neon Cyan)
-    if (vocalTrack?.analysis?.pitch_frames) {
-      drawPitchCurve(
-        vocalTrack.analysis.pitch_frames,
-        '#00f2fe',
-        'rgba(0, 242, 254, 0.6)',
-        3
-      );
-    }
-
-    // 3. Draw Live Mic Pitch Trail
-    if (isRecording && livePitchHistoryRef.current.length > 0) {
-      ctx.shadowColor = '#f59e0b';
-      ctx.shadowBlur = 10;
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      let liveInPath = false;
-
-      livePitchHistoryRef.current.forEach((pt) => {
+    // 2. Draw Live Karaoke Microphone Pitch Trail (Color-Coded: Green/Orange/Red)
+    if (livePitchHistoryRef.current.length > 0) {
+      const pts = livePitchHistoryRef.current;
+      for (let i = 0; i < pts.length; i++) {
+        const pt = pts[i];
         const x = timeToX(pt.timeSec);
         const y = hzToY(pt.hz);
-        if (x >= 50 && x <= width + 10) {
-          if (!liveInPath) {
-            ctx.moveTo(x, y);
-            liveInPath = true;
-          } else {
-            ctx.lineTo(x, y);
-          }
+
+        if (x >= 55 && x <= width + 10) {
+          ctx.shadowColor = pt.color;
+          ctx.shadowBlur = 10;
+          ctx.fillStyle = pt.color;
+          ctx.beginPath();
+          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.fill();
         }
-      });
-      if (liveInPath) ctx.stroke();
+      }
       ctx.shadowBlur = 0;
     }
 
-    // 4. Draw Current Playhead Line
+    // 3. Draw Playhead Line
     const playheadX = timeToX(currentTimeSec);
     if (playheadX >= 60 && playheadX <= width) {
-      // Glow Playhead
       ctx.shadowColor = '#00f2fe';
       ctx.shadowBlur = 12;
       ctx.strokeStyle = '#00f2fe';
@@ -245,7 +237,6 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      // Playhead Top Pointer
       ctx.fillStyle = '#00f2fe';
       ctx.beginPath();
       ctx.moveTo(playheadX - 6, 0);
@@ -255,8 +246,8 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       ctx.fill();
     }
   }, [
-    vocalTrack,
-    referenceTrack,
+    vocalRefTrack,
+    instrumentalTrack,
     currentTimeSec,
     durationSec,
     zoomLevel,
@@ -300,19 +291,20 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     <div className="glass-card pitch-visualizer-card" ref={containerRef}>
       <div className="card-header space-between">
         <div className="header-icon-group">
-          <h3 className="card-title">Dual Track Pitch Alignment Graph (YIN Algorithm)</h3>
+          <h3 className="card-title">Live Karaoke Pitch Visualizer (Dynamic Color Accuracy)</h3>
           <div className="legend-group">
-            <span className="legend-item cyan">
-              <span className="legend-dot cyan-dot" /> Vocal Pitch (Hz)
-            </span>
             <span className="legend-item purple">
-              <span className="legend-dot purple-dot" /> Reference Guide (Hz)
+              <span className="legend-dot purple-dot" /> Original Singer Guide (Hz)
             </span>
-            {isRecording && (
-              <span className="legend-item orange">
-                <span className="legend-dot orange-dot" /> Live Mic Input
-              </span>
-            )}
+            <span className="legend-item green">
+              <span className="legend-dot green-dot" /> 🟢 Live In-Tune (≤20 cents)
+            </span>
+            <span className="legend-item orange">
+              <span className="legend-dot orange-dot" /> 🟠 Slightly Off (20-45 cents)
+            </span>
+            <span className="legend-item red">
+              <span className="legend-dot red-dot" /> 🔴 Off-Pitch (&gt;45 cents)
+            </span>
           </div>
         </div>
 
@@ -347,15 +339,14 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
         />
       </div>
 
-      {/* Real-time pitch readout pill */}
-      {vocalTrack?.analysis && (
+      {vocalRefTrack?.analysis && (
         <div className="canvas-footer-stats">
           <span>
-            Vocal Range: <strong>{vocalTrack.analysis.min_pitch_hz.toFixed(0)} Hz</strong> -{' '}
-            <strong>{vocalTrack.analysis.max_pitch_hz.toFixed(0)} Hz</strong>
+            Original Range: <strong>{vocalRefTrack.analysis.min_pitch_hz.toFixed(0)} Hz</strong> -{' '}
+            <strong>{vocalRefTrack.analysis.max_pitch_hz.toFixed(0)} Hz</strong>
           </span>
           <span>
-            Avg Pitch: <strong>{vocalTrack.analysis.avg_pitch_hz.toFixed(1)} Hz</strong> ({hzToNote(vocalTrack.analysis.avg_pitch_hz).noteName})
+            Original Avg Pitch: <strong>{vocalRefTrack.analysis.avg_pitch_hz.toFixed(1)} Hz</strong> ({hzToNote(vocalRefTrack.analysis.avg_pitch_hz).noteName})
           </span>
         </div>
       )}

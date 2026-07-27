@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, Activity, Layers } from 'lucide-react';
+import { Mic, Activity } from 'lucide-react';
 import { isTauriAvailable } from '../services/tauriBridge';
 
 interface HeaderProps {

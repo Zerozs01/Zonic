@@ -47,7 +47,7 @@ export interface AnalysisResult {
 }
 
 export interface LoadedTrack {
-  id: 'vocal' | 'reference';
+  id: 'vocalRef' | 'instrumental' | 'userVocal';
   name: string;
   filePath: string;
   meta: AudioFileMeta | null;
@@ -56,12 +56,13 @@ export interface LoadedTrack {
   color: string;
 }
 
-export interface AlignmentMetrics {
-  overallScore: number; // 0 to 100%
-  inTunePercentage: number;
-  flatPercentage: number;
-  sharpPercentage: number;
-  avgCentsOffset: number;
-  vocalRangeNoteMin: string;
-  vocalRangeNoteMax: string;
+export interface LiveKaraokeState {
+  targetNote: string;
+  targetHz: number;
+  userNote: string;
+  userHz: number;
+  centsOffset: number;
+  accuracyScore: number; // 0 to 100%
+  colorStatus: 'green' | 'orange' | 'red' | 'none';
+  feedbackText: string;
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Header } from './components/Header';
 import { DropZone } from './components/DropZone';
@@ -6,6 +6,7 @@ import { PitchVisualizer } from './components/PitchVisualizer';
 import { AudioControls } from './components/AudioControls';
 import { MetricsPanel } from './components/MetricsPanel';
 import { MicControlDeck } from './components/MicControlDeck';
+import { KaraokeHUD } from './components/KaraokeHUD';
 import {
   AudioDevice,
   LoadedTrack,
@@ -22,12 +23,12 @@ import {
 import { processAudioFileInBrowser } from './utils/webAudioPitch';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dual' | 'live'>('dual');
-  const [statusMsg, setStatusMsg] = useState<string>('VocalAlign Engine Ready.');
+  const [activeTab, setActiveTab] = useState<'dual' | 'live'>('live');
+  const [statusMsg, setStatusMsg] = useState<string>('Karaoke Live Vocal Training Engine Ready.');
 
-  // Audio Tracks
-  const [vocalTrack, setVocalTrack] = useState<LoadedTrack | null>(null);
-  const [referenceTrack, setReferenceTrack] = useState<LoadedTrack | null>(null);
+  // Reference Audio Tracks
+  const [vocalRefTrack, setVocalRefTrack] = useState<LoadedTrack | null>(null);
+  const [instrumentalTrack, setInstrumentalTrack] = useState<LoadedTrack | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
   // Playback State
@@ -38,17 +39,21 @@ export default function App() {
   const playbackStartTimeRef = useRef<number>(0);
   const playbackStartOffsetRef = useRef<number>(0);
 
-  // Audio Context for Web Audio Playback
+  // Audio Context for Backing & Guide Audio Playback
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const vocalSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const refSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const vocalRefSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const instSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
-  // Microphone Hardware Input State
+  // Microphone Hardware Input State (DEFAULT ACTIVE)
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recStatus, setRecStatus] = useState<RecordingStatus | null>(null);
   const [liveMicFrame, setLiveMicFrame] = useState<PitchFrame | null>(null);
+
+  // Live Performance Match Score
+  const [overallScore, setOverallScore] = useState<number>(100);
+  const scoreHistoryRef = useRef<number[]>([]);
 
   // Scan Audio Input Devices on startup
   const handleScanDevices = async () => {
@@ -60,10 +65,10 @@ export default function App() {
         const def = devList.find((d) => d.is_default) || devList[0];
         setSelectedDevice(def.name);
       }
-      setStatusMsg(`Found ${devList.length} input device(s).`);
+      setStatusMsg(`Microphone ready: Found ${devList.length} input device(s).`);
     } catch (err: any) {
       console.warn('Device scan warning:', err);
-      setStatusMsg('Audio input scan ready (Web Audio Fallback)');
+      setStatusMsg('Microphone ready (Web Audio Input)');
     }
   };
 
@@ -90,8 +95,28 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isRecording]);
 
+  // Update real-time score
+  useEffect(() => {
+    if (isPlaying && isRecording && liveMicFrame?.is_voiced && vocalRefTrack?.analysis?.pitch_frames) {
+      const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
+      const targetFrame = vocalRefTrack.analysis.pitch_frames[frameIdx];
+      if (targetFrame && targetFrame.is_voiced && targetFrame.frequency_hz > 0) {
+        const cents = Math.abs(1200 * Math.log2(liveMicFrame.frequency_hz / targetFrame.frequency_hz));
+        const frameScore = Math.max(0, Math.min(100, Math.round(100 - cents * 0.8)));
+        scoreHistoryRef.current.push(frameScore);
+
+        if (scoreHistoryRef.current.length > 50) {
+          scoreHistoryRef.current.shift();
+        }
+
+        const avg = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
+        setOverallScore(Math.round(avg));
+      }
+    }
+  }, [isPlaying, isRecording, liveMicFrame, currentTimeSec, vocalRefTrack]);
+
   // Handle Track Loaded (Drag & Drop or File Selector)
-  const handleTrackLoaded = async (trackType: 'vocal' | 'reference', file: File) => {
+  const handleTrackLoaded = async (trackType: 'vocalRef' | 'instrumental', file: File) => {
     setIsProcessing(true);
     setStatusMsg(`Decoding and analyzing pitch for '${file.name}' using YIN algorithm...`);
     try {
@@ -104,17 +129,17 @@ export default function App() {
         meta,
         analysis,
         audioBuffer,
-        color: trackType === 'vocal' ? '#00f2fe' : '#a855f7',
+        color: trackType === 'vocalRef' ? '#a855f7' : '#00f2fe',
       };
 
-      if (trackType === 'vocal') {
-        setVocalTrack(track);
+      if (trackType === 'vocalRef') {
+        setVocalRefTrack(track);
       } else {
-        setReferenceTrack(track);
+        setInstrumentalTrack(track);
       }
 
       setStatusMsg(
-        `Successfully loaded '${file.name}' (${analysis.voiced_frames} pitch frames extracted)`
+        `Successfully loaded '${file.name}' (${analysis.voiced_frames} pitch guide frames extracted)`
       );
     } catch (err: any) {
       console.error('File load error:', err);
@@ -124,17 +149,17 @@ export default function App() {
     }
   };
 
-  const handleClearTrack = (trackType: 'vocal' | 'reference') => {
+  const handleClearTrack = (trackType: 'vocalRef' | 'instrumental') => {
     if (isPlaying) stopPlayback();
-    if (trackType === 'vocal') setVocalTrack(null);
-    else setReferenceTrack(null);
-    setStatusMsg(`Cleared ${trackType} track.`);
+    if (trackType === 'vocalRef') setVocalRefTrack(null);
+    else setInstrumentalTrack(null);
+    setStatusMsg(`Cleared ${trackType === 'vocalRef' ? 'Original Vocal Guide' : 'Instrumental'} track.`);
   };
 
   // Playback Control
   const maxDuration = Math.max(
-    vocalTrack?.meta?.duration_seconds || 0,
-    referenceTrack?.meta?.duration_seconds || 0
+    vocalRefTrack?.meta?.duration_seconds || 0,
+    instrumentalTrack?.meta?.duration_seconds || 0
   );
 
   const startPlayback = (startAtSec = currentTimeSec) => {
@@ -143,40 +168,45 @@ export default function App() {
     }
     const ctx = audioCtxRef.current;
 
-    // Stop existing sources
-    if (vocalSourceRef.current) {
-      vocalSourceRef.current.stop();
-      vocalSourceRef.current.disconnect();
+    // Auto-start Microphone capture if not already recording
+    if (!isRecording) {
+      handleStartMic();
     }
-    if (refSourceRef.current) {
-      refSourceRef.current.stop();
-      refSourceRef.current.disconnect();
+
+    // Stop existing sources
+    if (vocalRefSourceRef.current) {
+      try { vocalRefSourceRef.current.stop(); } catch (e) {}
+      vocalRefSourceRef.current.disconnect();
+    }
+    if (instSourceRef.current) {
+      try { instSourceRef.current.stop(); } catch (e) {}
+      instSourceRef.current.disconnect();
     }
 
     if (startAtSec >= maxDuration) startAtSec = 0;
 
-    // Play Vocal Buffer
-    if (vocalTrack?.audioBuffer) {
-      const vSource = ctx.createBufferSource();
-      vSource.buffer = vocalTrack.audioBuffer;
+    // Play Instrumental Backing Track
+    if (instrumentalTrack?.audioBuffer) {
+      const iSource = ctx.createBufferSource();
+      iSource.buffer = instrumentalTrack.audioBuffer;
       const gainNode = ctx.createGain();
       gainNode.gain.value = volume;
+      iSource.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      iSource.start(0, startAtSec);
+      instSourceRef.current = iSource;
+    }
+
+    // Play Original Vocal Guide Track (optional guide volume)
+    if (vocalRefTrack?.audioBuffer) {
+      const vSource = ctx.createBufferSource();
+      vSource.buffer = vocalRefTrack.audioBuffer;
+      const gainNode = ctx.createGain();
+      gainNode.gain.value = volume * 0.7; // Guide vocal slightly lower
       vSource.connect(gainNode);
       gainNode.connect(ctx.destination);
       vSource.start(0, startAtSec);
-      vocalSourceRef.current = vSource;
-    }
-
-    // Play Reference Buffer
-    if (referenceTrack?.audioBuffer) {
-      const rSource = ctx.createBufferSource();
-      rSource.buffer = referenceTrack.audioBuffer;
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = volume;
-      rSource.connect(gainNode);
-      gainNode.connect(ctx.destination);
-      rSource.start(0, startAtSec);
-      refSourceRef.current = rSource;
+      vocalRefSourceRef.current = vSource;
     }
 
     setIsPlaying(true);
@@ -200,15 +230,15 @@ export default function App() {
   };
 
   const stopPlayback = () => {
-    if (vocalSourceRef.current) {
-      try { vocalSourceRef.current.stop(); } catch (e) {}
-      vocalSourceRef.current.disconnect();
-      vocalSourceRef.current = null;
+    if (vocalRefSourceRef.current) {
+      try { vocalRefSourceRef.current.stop(); } catch (e) {}
+      vocalRefSourceRef.current.disconnect();
+      vocalRefSourceRef.current = null;
     }
-    if (refSourceRef.current) {
-      try { refSourceRef.current.stop(); } catch (e) {}
-      refSourceRef.current.disconnect();
-      refSourceRef.current = null;
+    if (instSourceRef.current) {
+      try { instSourceRef.current.stop(); } catch (e) {}
+      instSourceRef.current.disconnect();
+      instSourceRef.current = null;
     }
     if (playbackAnimRef.current) {
       cancelAnimationFrame(playbackAnimRef.current);
@@ -235,11 +265,11 @@ export default function App() {
   // Mic Controls
   const handleStartMic = async () => {
     try {
-      setStatusMsg('Starting low-latency microphone capture stream...');
+      setStatusMsg('Starting live microphone capture stream...');
       const status = await startMicStream(selectedDevice);
       setRecStatus(status);
       setIsRecording(true);
-      setStatusMsg(`Recording active from: ${selectedDevice || 'Default Microphone'}`);
+      setStatusMsg(`Live Karaoke Mic active: ${selectedDevice || 'Default Microphone'}`);
     } catch (err: any) {
       setStatusMsg(`Error starting mic: ${err?.message || err?.toString()}`);
     }
@@ -250,11 +280,18 @@ export default function App() {
       const status = await stopMicStream();
       setRecStatus(status);
       setIsRecording(false);
-      setStatusMsg('Microphone capture stream stopped.');
+      setStatusMsg('Microphone stream stopped.');
     } catch (err: any) {
       setStatusMsg(`Error stopping mic: ${err?.message || err?.toString()}`);
     }
   };
+
+  // Current Target Pitch Frame for HUD
+  const targetPitchFrame = (() => {
+    if (!vocalRefTrack?.analysis?.pitch_frames) return null;
+    const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
+    return vocalRefTrack.analysis.pitch_frames[frameIdx] || null;
+  })();
 
   return (
     <div className="app-container">
@@ -263,19 +300,27 @@ export default function App() {
 
       {/* Main Content Area */}
       <main style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* Track Dropzones */}
+        {/* Track Dropzones: Original Vocal & Instrumental BGM */}
         <DropZone
-          vocalTrack={vocalTrack}
-          referenceTrack={referenceTrack}
+          vocalRefTrack={vocalRefTrack}
+          instrumentalTrack={instrumentalTrack}
           onTrackLoaded={handleTrackLoaded}
           onClearTrack={handleClearTrack}
           isProcessing={isProcessing}
         />
 
-        {/* Pitch Alignment Visualizer Canvas */}
+        {/* Real-Time Karaoke Pitch & Key HUD */}
+        <KaraokeHUD
+          targetPitchFrame={targetPitchFrame}
+          liveMicFrame={liveMicFrame}
+          isRecording={isRecording}
+          overallScore={overallScore}
+        />
+
+        {/* Dynamic Color Karaoke Pitch Visualizer Canvas */}
         <PitchVisualizer
-          vocalTrack={vocalTrack}
-          referenceTrack={referenceTrack}
+          vocalRefTrack={vocalRefTrack}
+          instrumentalTrack={instrumentalTrack}
           currentTimeSec={currentTimeSec}
           durationSec={maxDuration}
           onSeek={handleSeek}
@@ -297,7 +342,7 @@ export default function App() {
 
         {/* Grid: Metrics Panel & Mic Deck */}
         <div className="grid-two-cols">
-          <MetricsPanel vocalTrack={vocalTrack} referenceTrack={referenceTrack} />
+          <MetricsPanel vocalRefTrack={vocalRefTrack} liveMicFrame={liveMicFrame} />
 
           <MicControlDeck
             devices={devices}
@@ -320,7 +365,7 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        VocalAlign Engine • Phase 1-3 Active • Tauri Rust Audio & HTML5 Canvas Pitch Alignment
+        VocalAlign Karaoke Practice Engine • Phase 1-4 Active • YIN Pitch Detection & Live Note Matching
       </footer>
     </div>
   );
