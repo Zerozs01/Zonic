@@ -7,7 +7,7 @@ interface HeaderProps {
   onSelectTab: (tab: 'dual' | 'live') => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ activeTab, onSelectTab }) => {
+export const Header: React.FC<HeaderProps> = React.memo(({ activeTab, onSelectTab }) => {
   const isTauri = isTauriAvailable();
 
   return (
@@ -45,4 +45,5 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onSelectTab }) => {
       </div>
     </header>
   );
-};
+});
+

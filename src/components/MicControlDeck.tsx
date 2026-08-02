@@ -14,7 +14,7 @@ interface MicControlDeckProps {
   liveMicFrame: PitchFrame | null;
 }
 
-export const MicControlDeck: React.FC<MicControlDeckProps> = ({
+export const MicControlDeck: React.FC<MicControlDeckProps> = React.memo(({
   devices,
   selectedDevice,
   onSelectDevice,
@@ -103,4 +103,5 @@ export const MicControlDeck: React.FC<MicControlDeckProps> = ({
       </div>
     </div>
   );
-};
+});
+

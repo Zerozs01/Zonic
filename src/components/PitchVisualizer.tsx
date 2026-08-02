@@ -79,23 +79,34 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     }
   }, [liveMicFrame, currentTimeSec, vocalRefTrack]);
 
+  const lastSizeRef = useRef<{ width: number; height: number; dpr: number }>({ width: 0, height: 0, dpr: 0 });
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle high DPI scaling
+    // Handle DPI scaling without resetting canvas dimensions every frame
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.parentElement?.clientWidth || 800;
     const height = 360;
 
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-
-    ctx.scale(dpr, dpr);
+    if (
+      lastSizeRef.current.width !== width ||
+      lastSizeRef.current.height !== height ||
+      lastSizeRef.current.dpr !== dpr
+    ) {
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      ctx.scale(dpr, dpr);
+      lastSizeRef.current = { width, height, dpr };
+    } else {
+      // Clear canvas without resetting width/height GPU state
+      ctx.clearRect(0, 0, width, height);
+    }
 
     // Clear Background with dark gradient
     const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
@@ -164,7 +175,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       }
     }
 
-    // 1. Draw Original Vocal Guide Pitch Contour (Violet)
+    // 1. Draw Original Vocal Guide Pitch Contour with Viewport Windowing
     if (vocalRefTrack?.analysis?.pitch_frames) {
       ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
       ctx.shadowBlur = 8;
@@ -175,7 +186,11 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       let inPath = false;
       const frames = vocalRefTrack.analysis.pitch_frames;
 
-      for (let i = 0; i < frames.length; i++) {
+      // Viewport Windowing: Compute start and end frame indices (10ms hop size)
+      const startIdx = Math.max(0, Math.floor((startTimeSec - 0.5) * 100));
+      const endIdx = Math.min(frames.length - 1, Math.ceil((startTimeSec + visibleDuration + 0.5) * 100));
+
+      for (let i = startIdx; i <= endIdx; i++) {
         const f = frames[i];
         if (!f.is_voiced || f.frequency_hz <= 0) {
           if (inPath) {
@@ -204,11 +219,14 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       ctx.shadowBlur = 0;
     }
 
-    // 2. Draw Live Karaoke Microphone Pitch Trail (Color-Coded: Green/Orange/Red)
+    // 2. Draw Live Karaoke Microphone Pitch Trail (Color-Coded) with Viewport Windowing
     if (livePitchHistoryRef.current.length > 0) {
       const pts = livePitchHistoryRef.current;
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
+        if (pt.timeSec < startTimeSec - 0.5 || pt.timeSec > startTimeSec + visibleDuration + 0.5) {
+          continue;
+        }
         const x = timeToX(pt.timeSec);
         const y = hzToY(pt.hz);
 
@@ -255,6 +273,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     isRecording,
     liveMicFrame,
   ]);
+
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     isDraggingRef.current = true;

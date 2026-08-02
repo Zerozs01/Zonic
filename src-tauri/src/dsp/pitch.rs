@@ -74,21 +74,28 @@ impl YinDetector {
             return unvoiced_frame(timestamp_ms, amplitude_db);
         }
 
-        // Step 1: Difference Function
+        // Step 1 & 2: Difference Function bounded to valid pitch range + auto-vectorized zip
+        let upper_tau = (max_tau + 2).min(half_window);
         self.yin_buffer[0] = 1.0;
-        for tau in 1..half_window {
-            let mut diff = 0.0f32;
-            for j in 0..half_window {
-                let delta = samples[j] - samples[j + tau];
-                diff += delta * delta;
-            }
+
+        let base_slice = &samples[..half_window];
+        for tau in 1..upper_tau {
+            let shifted_slice = &samples[tau..half_window + tau];
+            let diff: f32 = base_slice
+                .iter()
+                .zip(shifted_slice.iter())
+                .map(|(&a, &b)| {
+                    let d = a - b;
+                    d * d
+                })
+                .sum();
             self.yin_buffer[tau] = diff;
         }
 
         // Step 2: Cumulative Mean Normalized Difference Function
         let mut running_sum = 0.0f32;
         self.yin_buffer[0] = 1.0;
-        for tau in 1..half_window {
+        for tau in 1..upper_tau {
             running_sum += self.yin_buffer[tau];
             if running_sum > 0.0 {
                 self.yin_buffer[tau] *= tau as f32 / running_sum;
@@ -96,6 +103,7 @@ impl YinDetector {
                 self.yin_buffer[tau] = 1.0;
             }
         }
+
 
         // Step 3: Absolute Thresholding
         let mut best_tau = 0;

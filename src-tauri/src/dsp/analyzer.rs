@@ -1,4 +1,5 @@
 use super::pitch::{YinConfig, YinDetector, PitchFrame};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -27,34 +28,55 @@ pub fn analyze_pcm_buffer(
         max_freq_hz: 1200.0,
     };
 
-    let mut detector = YinDetector::new(config);
     let hop_samples = ((sample_rate as f32 * hop_ms) / 1000.0) as usize;
     let hop_samples = hop_samples.max(64);
 
     let total_samples = samples.len();
     let duration_seconds = total_samples as f32 / sample_rate as f32;
 
-    let mut frames = Vec::new();
+    if total_samples < window_size {
+        return AnalysisResult {
+            total_duration_seconds: duration_seconds,
+            sample_rate,
+            total_frames: 0,
+            voiced_frames: 0,
+            pitch_frames: vec![],
+            min_pitch_hz: 0.0,
+            max_pitch_hz: 0.0,
+            avg_pitch_hz: 0.0,
+        };
+    }
+
+    let mut frame_indices = Vec::new();
+    let mut index = 0;
+    while index + window_size <= total_samples {
+        frame_indices.push(index);
+        index += hop_samples;
+    }
+
+    // Multi-threaded parallel pitch detection using Rayon
+    let frames: Vec<PitchFrame> = frame_indices
+        .par_iter()
+        .map(|&idx| {
+            let timestamp_ms = (idx as f64 / sample_rate as f64) * 1000.0;
+            let chunk = &samples[idx..idx + window_size];
+            let mut detector = YinDetector::new(config.clone());
+            detector.detect_pitch(chunk, timestamp_ms)
+        })
+        .collect();
+
     let mut voiced_count = 0;
     let mut min_hz = f32::MAX;
     let mut max_hz = 0.0f32;
     let mut hz_sum = 0.0f64;
 
-    let mut index = 0;
-    while index + window_size <= total_samples {
-        let timestamp_ms = (index as f64 / sample_rate as f64) * 1000.0;
-        let chunk = &samples[index..index + window_size];
-        let frame = detector.detect_pitch(chunk, timestamp_ms);
-
+    for frame in &frames {
         if frame.is_voiced {
             voiced_count += 1;
             min_hz = min_hz.min(frame.frequency_hz);
             max_hz = max_hz.max(frame.frequency_hz);
             hz_sum += frame.frequency_hz as f64;
         }
-
-        frames.push(frame);
-        index += hop_samples;
     }
 
     let avg_hz = if voiced_count > 0 {
@@ -78,3 +100,4 @@ pub fn analyze_pcm_buffer(
         avg_pitch_hz: avg_hz,
     }
 }
+

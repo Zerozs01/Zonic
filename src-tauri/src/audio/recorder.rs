@@ -25,6 +25,11 @@ pub struct AudioRecorder {
     ring_buffer: Arc<Mutex<Vec<f32>>>,
 }
 
+// cpal::Stream contains a raw pointer (*mut ()) on Windows making it !Send and !Sync by default.
+// Since AudioRecorder is always accessed behind a Mutex, it is safe to implement Send and Sync.
+unsafe impl Send for AudioRecorder {}
+unsafe impl Sync for AudioRecorder {}
+
 impl AudioRecorder {
     pub fn new() -> Self {
         Self {
@@ -55,10 +60,12 @@ impl AudioRecorder {
         };
 
         let device_name_str = device.name().unwrap_or_else(|_| "Default Microphone".to_string());
-        let config: StreamConfig = device
+        let supported_config = device
             .default_input_config()
-            .map_err(|e| format!("Failed to get input config: {}", e))?
-            .into();
+            .map_err(|e| format!("Failed to get input config: {}", e))?;
+
+        let sample_format = supported_config.sample_format();
+        let config: StreamConfig = supported_config.into();
 
         let sample_rate = config.sample_rate.0;
         let channels = config.channels as usize;
@@ -79,7 +86,7 @@ impl AudioRecorder {
             eprintln!("Error on audio input stream: {}", err);
         };
 
-        let stream = match config.sample_format {
+        let stream = match sample_format {
             cpal::SampleFormat::F32 => device.build_input_stream(
                 &config,
                 move |data: &[f32], _| {
@@ -217,8 +224,8 @@ fn process_audio_chunk_f32(
     let mut buf = ring_buffer.lock();
     buf.extend(mono_chunk);
     // Keep max 5 seconds buffer at 48kHz (approx 240,000 samples)
-    if buf.len() > 240,000 {
-        let overflow = buf.len() - 240,000;
+    if buf.len() > 240_000 {
+        let overflow = buf.len() - 240_000;
         buf.drain(0..overflow);
     }
 }

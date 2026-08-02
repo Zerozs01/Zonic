@@ -10,7 +10,7 @@ interface DropZoneProps {
   isProcessing: boolean;
 }
 
-export const DropZone: React.FC<DropZoneProps> = ({
+export const DropZone: React.FC<DropZoneProps> = React.memo(({
   vocalRefTrack,
   instrumentalTrack,
   onTrackLoaded,
@@ -173,4 +173,5 @@ export const DropZone: React.FC<DropZoneProps> = ({
       </div>
     </div>
   );
-};
+});
+

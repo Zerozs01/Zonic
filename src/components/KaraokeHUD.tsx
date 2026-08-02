@@ -9,7 +9,7 @@ interface KaraokeHUDProps {
   overallScore: number;
 }
 
-export const KaraokeHUD: React.FC<KaraokeHUDProps> = ({
+export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   targetPitchFrame,
   liveMicFrame,
   isRecording,
@@ -157,4 +157,5 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = ({
       </div>
     </div>
   );
-};
+});
+

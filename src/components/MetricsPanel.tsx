@@ -8,7 +8,7 @@ interface MetricsPanelProps {
   liveMicFrame: PitchFrame | null;
 }
 
-export const MetricsPanel: React.FC<MetricsPanelProps> = ({ vocalRefTrack, liveMicFrame }) => {
+export const MetricsPanel: React.FC<MetricsPanelProps> = React.memo(({ vocalRefTrack, liveMicFrame }) => {
   return (
     <div className="glass-card metrics-card">
       <div className="card-header">
@@ -47,4 +47,5 @@ export const MetricsPanel: React.FC<MetricsPanelProps> = ({ vocalRefTrack, liveM
       </div>
     </div>
   );
-};
+});
+

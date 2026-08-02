@@ -14,12 +14,15 @@ import {
   RecordingStatus,
 } from './types/audio';
 import {
+  analyzeAudioFilePitchNative,
   analyzeLiveStreamPitchNative,
   fetchMicStatus,
+  isTauriAvailable,
   scanMicrophones,
   startMicStream,
   stopMicStream,
 } from './services/tauriBridge';
+
 import { processAudioFileInBrowser } from './utils/webAudioPitch';
 
 export default function App() {
@@ -110,22 +113,44 @@ export default function App() {
         }
 
         const avg = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
-        setOverallScore(Math.round(avg));
+        const roundedAvg = Math.round(avg);
+        setOverallScore((prev) => (prev !== roundedAvg ? roundedAvg : prev));
       }
     }
-  }, [isPlaying, isRecording, liveMicFrame, currentTimeSec, vocalRefTrack]);
+  }, [isPlaying, isRecording, liveMicFrame, vocalRefTrack]);
 
   // Handle Track Loaded (Drag & Drop or File Selector)
   const handleTrackLoaded = async (trackType: 'vocalRef' | 'instrumental', file: File) => {
     setIsProcessing(true);
     setStatusMsg(`Decoding and analyzing pitch for '${file.name}' using YIN algorithm...`);
     try {
-      const { meta, analysis, audioBuffer } = await processAudioFileInBrowser(file);
+      let meta: any;
+      let analysis: any;
+      let audioBuffer: AudioBuffer;
+
+      const filePath = (file as any).path || file.name;
+      const isTauri = isTauriAvailable();
+
+      if (isTauri && (file as any).path) {
+        // Native Rust DSP Engine path
+        setStatusMsg(`Running multi-threaded Rust DSP engine for '${file.name}'...`);
+        const nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
+        const browserRes = await processAudioFileInBrowser(file);
+        audioBuffer = browserRes.audioBuffer;
+        meta = browserRes.meta;
+        analysis = nativeAnalysis || browserRes.analysis;
+      } else {
+        // Browser Web Audio Engine fallback path
+        const res = await processAudioFileInBrowser(file);
+        meta = res.meta;
+        analysis = res.analysis;
+        audioBuffer = res.audioBuffer;
+      }
 
       const track: LoadedTrack = {
         id: trackType,
         name: file.name,
-        filePath: file.name,
+        filePath,
         meta,
         analysis,
         audioBuffer,
@@ -148,6 +173,7 @@ export default function App() {
       setIsProcessing(false);
     }
   };
+
 
   const handleClearTrack = (trackType: 'vocalRef' | 'instrumental') => {
     if (isPlaying) stopPlayback();

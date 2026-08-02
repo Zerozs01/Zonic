@@ -19,6 +19,9 @@ export function hzToNote(frequencyHz: number): { noteName: string; centsOffset: 
   return { noteName, centsOffset };
 }
 
+// Shared reusable buffer to avoid allocations on every frame
+let sharedYinBuffer: Float32Array | null = null;
+
 export function detectYinPitch(
   samples: Float32Array,
   sampleRate: number,
@@ -35,12 +38,17 @@ export function detectYinPitch(
     return { frequencyHz: 0, clarity: 0, isVoiced: false };
   }
 
-  // Step 1 & 2: Difference function & Cumulative mean normalized difference
-  const d = new Float32Array(halfWindow);
+  if (!sharedYinBuffer || sharedYinBuffer.length < halfWindow) {
+    sharedYinBuffer = new Float32Array(halfWindow);
+  }
+  const d = sharedYinBuffer;
+  const upperTau = Math.min(halfWindow, maxTau + 2);
+
+  // Step 1 & 2: Bounded Difference function & Cumulative mean normalized difference
   d[0] = 1;
   let runningSum = 0;
 
-  for (let tau = 1; tau < halfWindow; tau++) {
+  for (let tau = 1; tau < upperTau; tau++) {
     let diffSum = 0;
     for (let i = 0; i < halfWindow; i++) {
       const delta = samples[i] - samples[i + tau];
@@ -55,6 +63,7 @@ export function detectYinPitch(
       d[tau] = 1;
     }
   }
+
 
   // Step 3: Absolute threshold
   let bestTau = -1;
