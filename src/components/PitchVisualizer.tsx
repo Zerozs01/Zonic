@@ -10,6 +10,7 @@ interface PitchVisualizerProps {
   onSeek: (timeSec: number) => void;
   liveMicFrame: PitchFrame | null;
   isRecording: boolean;
+  transposeKey?: number;
 }
 
 const SCALE_NOTES = [
@@ -31,6 +32,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   onSeek,
   liveMicFrame,
   isRecording,
+  transposeKey = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,6 +44,11 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   // Live pitch history for live mic input with target pitch color coding
   const livePitchHistoryRef = useRef<{ timeSec: number; hz: number; color: string }[]>([]);
 
+  const getTransposedHz = (hz: number) => {
+    if (hz <= 0 || transposeKey === 0) return hz;
+    return hz * Math.pow(2, transposeKey / 12);
+  };
+
   useEffect(() => {
     if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
       // Find reference target pitch at current time
@@ -51,7 +58,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
         const frameIdx = Math.floor((currentTimeSec * 1000) / 10); // 10ms hop
         if (frameIdx >= 0 && frameIdx < frames.length) {
           const refFrame = frames[frameIdx];
-          if (refFrame.is_voiced) targetHz = refFrame.frequency_hz;
+          if (refFrame.is_voiced) targetHz = getTransposedHz(refFrame.frequency_hz);
         }
       }
 
@@ -87,24 +94,25 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle DPI scaling without resetting canvas dimensions every frame
+    // Handle DPI scaling matching exact container width
     const dpr = window.devicePixelRatio || 1;
-    const width = canvas.parentElement?.clientWidth || 800;
+    const wrapper = canvas.parentElement;
+    const width = wrapper ? wrapper.getBoundingClientRect().width : 800;
     const height = 360;
 
     if (
-      lastSizeRef.current.width !== width ||
+      Math.abs(lastSizeRef.current.width - width) > 1 ||
       lastSizeRef.current.height !== height ||
       lastSizeRef.current.dpr !== dpr
     ) {
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+      canvas.style.width = '100%';
       canvas.style.height = `${height}px`;
       ctx.scale(dpr, dpr);
       lastSizeRef.current = { width, height, dpr };
     } else {
-      // Clear canvas without resetting width/height GPU state
+      // Clear canvas without resetting GPU state
       ctx.clearRect(0, 0, width, height);
     }
 
@@ -203,7 +211,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
 
         const tSec = f.timestamp_ms / 1000;
         const x = timeToX(tSec);
-        const y = hzToY(f.frequency_hz);
+        const y = hzToY(getTransposedHz(f.frequency_hz));
 
         if (x < 50 || x > width + 10) continue;
 
@@ -307,40 +315,40 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   };
 
   return (
-    <div className="glass-card pitch-visualizer-card" ref={containerRef}>
-      <div className="card-header space-between">
+    <div className="glass-card pitch-visualizer-card minimal" ref={containerRef}>
+      <div className="card-header space-between clean">
         <div className="header-icon-group">
-          <h3 className="card-title">Live Karaoke Pitch Visualizer (Dynamic Color Accuracy)</h3>
-          <div className="legend-group">
+          <h3 className="card-title minimal">Pitch Contour</h3>
+          <div className="legend-group clean">
             <span className="legend-item purple">
-              <span className="legend-dot purple-dot" /> Original Singer Guide (Hz)
+              <span className="legend-dot purple-dot" /> โน๊ตทำนอง
             </span>
             <span className="legend-item green">
-              <span className="legend-dot green-dot" /> 🟢 Live In-Tune (≤20 cents)
+              <span className="legend-dot green-dot" /> ตรงคีย์
             </span>
             <span className="legend-item orange">
-              <span className="legend-dot orange-dot" /> 🟠 Slightly Off (20-45 cents)
+              <span className="legend-dot orange-dot" /> เพี้ยนเล็กน้อย
             </span>
             <span className="legend-item red">
-              <span className="legend-dot red-dot" /> 🔴 Off-Pitch (&gt;45 cents)
+              <span className="legend-dot red-dot" /> หลุดคีย์
             </span>
           </div>
         </div>
 
         {/* Zoom Controls */}
-        <div className="zoom-controls">
+        <div className="zoom-controls clean">
           <button
-            className="btn-zoom"
+            className="btn-zoom-clean"
             onClick={() => setZoomLevel((z) => Math.max(1, z - 0.5))}
-            title="Zoom Out Timeline"
+            title="Zoom Out"
           >
             -
           </button>
-          <span className="zoom-label">{zoomLevel.toFixed(1)}x Zoom</span>
+          <span className="zoom-label-clean">{zoomLevel.toFixed(1)}x</span>
           <button
-            className="btn-zoom"
+            className="btn-zoom-clean"
             onClick={() => setZoomLevel((z) => Math.min(5, z + 0.5))}
-            title="Zoom In Timeline"
+            title="Zoom In"
           >
             +
           </button>

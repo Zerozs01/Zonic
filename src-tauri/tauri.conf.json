@@ -15,7 +15,8 @@
         "title": "VocalAlign 🎤 - Advanced Vocal Training",
         "width": 1280,
         "height": 800,
-        "resizable": true
+        "resizable": true,
+        "theme": "Dark"
       }
     ],
     "security": {

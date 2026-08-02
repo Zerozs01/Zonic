@@ -1,12 +1,14 @@
 import React from 'react';
-import { Mic, Music, Sparkles } from 'lucide-react';
+import { Mic, Music } from 'lucide-react';
 import { PitchFrame } from '../types/audio';
+import { hzToNote } from '../utils/webAudioPitch';
 
 interface KaraokeHUDProps {
   targetPitchFrame: PitchFrame | null;
   liveMicFrame: PitchFrame | null;
   isRecording: boolean;
   overallScore: number;
+  transposeKey?: number;
 }
 
 export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
@@ -14,6 +16,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   liveMicFrame,
   isRecording,
   overallScore,
+  transposeKey = 0,
 }) => {
   const getPitchComparison = () => {
     if (!targetPitchFrame || !targetPitchFrame.is_voiced || targetPitchFrame.frequency_hz <= 0) {
@@ -23,14 +26,19 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         userNote: liveMicFrame?.is_voiced ? liveMicFrame.note_name : '---',
         userHz: liveMicFrame?.is_voiced ? liveMicFrame.frequency_hz : 0,
         centsOffset: 0,
-        status: 'none' as const,
-        statusText: 'Listening to Guide Pitch...',
+        statusText: 'พร้อมเริ่มร้องคาราโอเกะ',
         colorClass: 'grey',
       };
     }
 
-    const targetHz = targetPitchFrame.frequency_hz;
-    const targetNote = targetPitchFrame.note_name;
+    const originalTargetHz = targetPitchFrame.frequency_hz;
+    const targetHz = transposeKey !== 0
+      ? originalTargetHz * Math.pow(2, transposeKey / 12)
+      : originalTargetHz;
+
+    const targetNote = transposeKey !== 0
+      ? (hzToNote(targetHz).noteName || targetPitchFrame.note_name)
+      : targetPitchFrame.note_name;
 
     if (!liveMicFrame || !liveMicFrame.is_voiced || liveMicFrame.frequency_hz <= 0) {
       return {
@@ -39,8 +47,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         userNote: '---',
         userHz: 0,
         centsOffset: 0,
-        status: 'none' as const,
-        statusText: isRecording ? 'Sing into Microphone...' : 'Press Play to Sing!',
+        statusText: isRecording ? 'ร้องใส่ไมค์ได้เลย...' : 'กดเล่นเพลงเพื่อเริ่มซ้อม',
         colorClass: 'grey',
       };
     }
@@ -48,7 +55,6 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
     const userHz = liveMicFrame.frequency_hz;
     const userNote = liveMicFrame.note_name;
 
-    // Calculate cents difference between user mic pitch and original singer pitch
     const centsOffset = Math.round(1200 * Math.log2(userHz / targetHz));
     const absOffset = Math.abs(centsOffset);
 
@@ -59,8 +65,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         userNote,
         userHz,
         centsOffset,
-        status: 'green' as const,
-        statusText: '🟢 PERFECT! In-Tune',
+        statusText: '🟢 PERFECT! เสียงตรงคีย์เป๊ะ',
         colorClass: 'green',
       };
     } else if (absOffset <= 45) {
@@ -70,8 +75,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         userNote,
         userHz,
         centsOffset,
-        status: 'orange' as const,
-        statusText: centsOffset > 0 ? '🟠 Slightly Sharp (ร้องสูงไป)' : '🟠 Slightly Flat (ร้องต่ำไป)',
+        statusText: centsOffset > 0 ? '🟠 สูงไปนิด (Slightly Sharp)' : '🟠 ต่ำไปนิด (Slightly Flat)',
         colorClass: 'orange',
       };
     } else {
@@ -81,8 +85,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         userNote,
         userHz,
         centsOffset,
-        status: 'red' as const,
-        statusText: centsOffset > 0 ? '🔴 Too Sharp! (หลุดคีย์สูง)' : '🔴 Too Flat! (หลุดคีย์ต่ำ)',
+        statusText: centsOffset > 0 ? '🔴 หลุดคีย์สูง' : '🔴 หลุดคีย์ต่ำ',
         colorClass: 'red',
       };
     }
@@ -91,71 +94,31 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   const comp = getPitchComparison();
 
   return (
-    <div className={`glass-card karaoke-hud-card ${comp.colorClass}`}>
-      <div className="hud-header">
-        <div className="hud-title-group">
-          <Sparkles size={20} className="glow-icon" />
-          <h3 className="hud-title">Real-Time Karaoke Pitch & Key HUD</h3>
-        </div>
-
-        <div className="score-pill">
-          <span>PITCH MATCH SCORE</span>
-          <strong className="score-pct">{overallScore}%</strong>
-        </div>
+    <div className="hud-bar-minimal">
+      {/* Target Note Badge */}
+      <div className="hud-pill-clean purple">
+        <Music size={14} color="#a855f7" />
+        <span className="pill-lbl">โน๊ตต้นฉบับ:</span>
+        <strong className="pill-val purple">{comp.targetNote}</strong>
       </div>
 
-      <div className="hud-notes-grid">
-        {/* Original Singer Target Note */}
-        <div className="note-card target-note-card">
-          <div className="note-card-header">
-            <Music size={16} color="#a855f7" />
-            <span>ต้นฉบับ (Original Singer)</span>
-          </div>
-          <div className="note-big purple">{comp.targetNote}</div>
-          <div className="note-hz">{comp.targetHz > 0 ? `${comp.targetHz.toFixed(1)} Hz` : 'No Voiced Note'}</div>
-        </div>
+      {/* Live Status Pill */}
+      <div className={`hud-status-pill ${comp.colorClass}`}>
+        {comp.statusText}
+      </div>
 
-        {/* Real-time Pitch Offset Meter */}
-        <div className="cents-gauge-box">
-          <div className={`status-banner-pill ${comp.colorClass}`}>
-            {comp.statusText}
-          </div>
+      {/* User Note Badge */}
+      <div className={`hud-pill-clean ${comp.colorClass}`}>
+        <Mic size={14} />
+        <span className="pill-lbl">เสียงคุณ:</span>
+        <strong className={`pill-val ${comp.colorClass}`}>{comp.userNote}</strong>
+      </div>
 
-          <div className="cents-offset-readout">
-            <span>Cents Deviation:</span>
-            <strong className={`cents-num ${comp.colorClass}`}>
-              {comp.centsOffset > 0 ? `+${comp.centsOffset}` : comp.centsOffset} cents
-            </strong>
-          </div>
-
-          {/* Visual Cents Meter Bar (-100 cents to +100 cents) */}
-          <div className="cents-bar-track">
-            <div className="cents-bar-center-line" />
-            <div
-              className={`cents-bar-indicator ${comp.colorClass}`}
-              style={{
-                left: `${Math.max(5, Math.min(95, 50 + (comp.centsOffset / 100) * 45))}%`,
-              }}
-            />
-          </div>
-          <div className="cents-labels">
-            <span>-100 (Flat)</span>
-            <span>0 (In-Tune)</span>
-            <span>+100 (Sharp)</span>
-          </div>
-        </div>
-
-        {/* User Live Mic Note */}
-        <div className={`note-card user-note-card ${comp.colorClass}`}>
-          <div className="note-card-header">
-            <Mic size={16} color="#00f2fe" />
-            <span>เสียงคุณ (Your Live Voice)</span>
-          </div>
-          <div className={`note-big ${comp.colorClass}`}>{comp.userNote}</div>
-          <div className="note-hz">{comp.userHz > 0 ? `${comp.userHz.toFixed(1)} Hz` : 'Sing into Mic'}</div>
-        </div>
+      {/* Real-time score indicator */}
+      <div className="hud-score-minimal">
+        <span>SCORE:</span>
+        <strong>{overallScore}%</strong>
       </div>
     </div>
   );
 });
-
