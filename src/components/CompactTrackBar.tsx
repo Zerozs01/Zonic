@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Mic, Music, UploadCloud, CheckCircle2, Trash2, Loader2 } from 'lucide-react';
+import { Mic, Music, UploadCloud, Trash2, Loader2 } from 'lucide-react';
 import { LoadedTrack } from '../types/audio';
 
 interface CompactTrackBarProps {
@@ -54,7 +54,7 @@ export const CompactTrackBar: React.FC<CompactTrackBarProps> = React.memo(({
       <input
         type="file"
         ref={instInputRef}
-        onChange={(e) => handleFileChange(e, 'instInputRef' as any ? 'instrumental' : 'instrumental')}
+        onChange={(e) => handleFileChange(e, 'instrumental')}
         accept="audio/*,.wav,.mp3,.ogg,.flac"
         style={{ display: 'none' }}
       />

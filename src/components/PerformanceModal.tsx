@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Trophy, Sparkles, Music, Mic, CheckCircle2 } from 'lucide-react';
+import { X, Trophy, Music, Mic, CheckCircle2 } from 'lucide-react';
 import { LoadedTrack } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
