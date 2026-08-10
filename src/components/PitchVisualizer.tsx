@@ -11,6 +11,7 @@ interface PitchVisualizerProps {
   liveMicFrame: PitchFrame | null;
   isRecording: boolean;
   transposeKey?: number;
+  bpm?: number;
 }
 
 const SCALE_NOTES = [

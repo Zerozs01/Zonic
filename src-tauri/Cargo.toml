@@ -20,14 +20,12 @@ rodio = "0.19"
 parking_lot = "0.12"
 rayon = "1.10"
 
-# Speed up development build time and cut RAM usage during `tauri dev`
+# Dev profile optimization settings
 [profile.dev]
 incremental = true
-debug = 1 # Reduces debug symbols size & linker RAM consumption by ~70%
 opt-level = 1
 
-# Optimize third-party dependencies so they compile once with optimization
 [profile.dev.package."*"]
-opt-level = 2
-debug = false
+opt-level = 1
+
 

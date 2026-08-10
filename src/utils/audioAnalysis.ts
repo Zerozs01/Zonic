@@ -1,10 +1,19 @@
 import { PitchFrame } from '../types/audio';
 import { hzToNote } from './webAudioPitch';
 
+export interface WordTimestamp {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface LyricLine {
   id: string;
-  timeSec: number;
+  startTime: number; // in seconds
+  endTime: number;   // in seconds
   text: string;
+  timeSec?: number;  // alias for backward compatibility
+  words?: WordTimestamp[];
 }
 
 /**
@@ -27,27 +36,61 @@ export function parseLyricsText(rawText: string, durationSec = 180): LyricLine[]
       const secs = parseInt(match[2], 10);
       const msStr = match[3] || '0';
       const ms = parseInt(msStr.padEnd(3, '0').slice(0, 3), 10);
-      const timeSec = mins * 60 + secs + ms / 1000;
+      const startTime = mins * 60 + secs + ms / 1000;
       const text = match[4].trim();
       if (text) {
-        parsedLrc.push({ id: `lrc-${i}`, timeSec, text });
+        // Estimate line duration as ~3.5 seconds
+        const endTime = startTime + 3.5;
+        const wordsArr = text.split(/\s+/).map((w, wIdx, arr) => {
+          const wLen = (endTime - startTime) / arr.length;
+          return {
+            word: w,
+            start: startTime + wIdx * wLen,
+            end: startTime + (wIdx + 1) * wLen,
+          };
+        });
+
+        parsedLrc.push({
+          id: `lrc-${i}`,
+          startTime,
+          endTime,
+          timeSec: startTime,
+          text,
+          words: wordsArr,
+        });
       }
     }
   }
 
   if (isLrc && parsedLrc.length > 0) {
-    return parsedLrc.sort((a, b) => a.timeSec - b.timeSec);
+    return parsedLrc.sort((a, b) => a.startTime - b.startTime);
   }
 
   // Plain text fallback: distribute lines evenly across song duration
   const total = lines.length;
-  const interval = durationSec > 0 ? (durationSec * 0.85) / Math.max(1, total) : 3;
+  const interval = durationSec > 0 ? (durationSec * 0.85) / Math.max(1, total) : 4;
 
-  return lines.map((text, idx) => ({
-    id: `plain-${idx}`,
-    timeSec: Math.round((idx * interval) * 100) / 100,
-    text: text.trim(),
-  }));
+  return lines.map((text, idx) => {
+    const startTime = Math.round(idx * interval * 100) / 100;
+    const endTime = Math.round((startTime + interval * 0.9) * 100) / 100;
+    const wordsArr = text.trim().split(/\s+/).map((w, wIdx, arr) => {
+      const wLen = (endTime - startTime) / arr.length;
+      return {
+        word: w,
+        start: startTime + wIdx * wLen,
+        end: startTime + (wIdx + 1) * wLen,
+      };
+    });
+
+    return {
+      id: `plain-${idx}`,
+      startTime,
+      endTime,
+      timeSec: startTime,
+      text: text.trim(),
+      words: wordsArr,
+    };
+  });
 }
 
 /**

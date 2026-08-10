@@ -65,33 +65,33 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
   return (
-    <footer className="w-full bg-zinc-950 border-t border-zinc-800/80 px-6 py-3 flex items-center justify-between gap-4 select-none">
+    <footer className="w-full bg-[#1e1e1e] border border-zinc-800/80 rounded-xl px-5 py-2.5 flex items-center justify-between gap-4 select-none shrink-0 shadow-lg">
       
       {/* 1. Key Transpose Widget (Left): [-] [🎵 Original key: x] [+] */}
-      <div className="flex items-center bg-zinc-800/90 border border-zinc-700/60 rounded-xl overflow-hidden shadow-inner">
+      <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-md overflow-hidden shadow">
         <button
           onClick={() => onTransposeChange(Math.max(-6, transposeKey - 1))}
           disabled={transposeKey <= -6}
-          className="px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-700/60 disabled:opacity-40 disabled:hover:bg-transparent font-bold transition-colors cursor-pointer text-base"
+          className="px-3 py-1.5 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 font-bold transition-colors cursor-pointer text-base"
           title="Lower Pitch (-1 Semitone)"
         >
           -
         </button>
 
-        <div className="px-3 py-1.5 flex flex-col items-center justify-center border-x border-zinc-700/50 min-w-[110px] bg-zinc-900/60">
-          <div className="flex items-center gap-1 text-zinc-400 text-xs">
-            <Music2 size={13} className="text-cyan-400" />
-            <span>Key</span>
+        <div className="px-3 py-1 flex items-center gap-1.5 border-x border-zinc-700/60 bg-[#222222]">
+          <Music2 size={13} className="text-cyan-400" />
+          <div className="flex flex-col items-center">
+            <span className="text-[10px] text-zinc-400 font-semibold leading-tight">Key</span>
+            <span className="text-xs font-bold text-zinc-100 leading-tight">
+              {transposeKey === 0 ? 'Original key: 0' : transposeKey > 0 ? `Original key: +${transposeKey}` : `Original key: ${transposeKey}`}
+            </span>
           </div>
-          <span className="text-xs font-semibold text-zinc-200">
-            {transposeKey === 0 ? 'Original key: 0' : transposeKey > 0 ? `Original key: +${transposeKey}` : `Original key: ${transposeKey}`}
-          </span>
         </div>
 
         <button
           onClick={() => onTransposeChange(Math.min(6, transposeKey + 1))}
           disabled={transposeKey >= 6}
-          className="px-3 py-2 text-zinc-300 hover:text-white hover:bg-zinc-700/60 disabled:opacity-40 disabled:hover:bg-transparent font-bold transition-colors cursor-pointer text-base"
+          className="px-3 py-1.5 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 font-bold transition-colors cursor-pointer text-base"
           title="Raise Pitch (+1 Semitone)"
         >
           +
@@ -99,7 +99,7 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
       </div>
 
       {/* 2. BPM Adjuster Widget (Center-Left): [ 🔔 120 BPM ⇡⇣ ] */}
-      <div className="flex items-center bg-zinc-800/90 border border-zinc-700/60 rounded-xl px-3 py-1.5 gap-2 shadow-inner">
+      <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-lg px-3 py-1.5 gap-2 shadow">
         <Bell size={16} className="text-amber-400" />
         <span className="text-sm font-bold text-zinc-100 font-mono tracking-tight">{bpm} BPM</span>
         
@@ -126,48 +126,48 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
         {/* Stop Button */}
         <button
           onClick={onStop}
-          className="w-10 h-10 rounded-lg bg-zinc-800/90 border border-zinc-700/60 hover:bg-zinc-700/80 text-zinc-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow"
+          className="w-10 h-10 rounded-lg bg-[#333333] border border-zinc-700/80 hover:bg-zinc-600 text-zinc-200 flex items-center justify-center transition-all cursor-pointer shadow"
           title="Stop Playback"
         >
-          <Square size={16} />
+          <Square size={16} className="fill-zinc-200" />
         </button>
 
-        {/* Big Circular Play / Pause Button */}
+        {/* Big Bright White Circular Play / Pause Button */}
         <button
           onClick={onPlayPause}
-          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg ${
+          className={`w-14 h-14 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xl ${
             isPlaying
-              ? 'bg-gradient-to-br from-amber-500 to-red-600 text-white shadow-amber-500/25 hover:scale-105'
-              : 'bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 text-white shadow-cyan-500/30 hover:scale-105'
+              ? 'bg-amber-500 hover:bg-amber-400 text-zinc-900'
+              : 'bg-white hover:bg-zinc-100 text-zinc-900 hover:scale-105 active:scale-95'
           }`}
           title={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? (
-            <Pause size={24} className="fill-white" />
+            <Pause size={24} className="fill-zinc-900 text-zinc-900" />
           ) : (
-            <Play size={24} className="fill-white ml-1" />
+            <Play size={24} className="fill-zinc-900 text-zinc-900 ml-1" />
           )}
         </button>
 
         {/* Replay / Restart Button */}
         <button
           onClick={() => onSeek(0)}
-          className="w-10 h-10 rounded-full bg-zinc-800/90 border border-zinc-700/60 hover:bg-zinc-700/80 text-zinc-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow"
+          className="w-10 h-10 rounded-full bg-[#333333] border border-zinc-700/80 hover:bg-zinc-600 text-zinc-200 flex items-center justify-center transition-all cursor-pointer shadow"
           title="Replay from Beginning"
         >
           <RotateCcw size={16} />
         </button>
 
         {/* Time Readout */}
-        <div className="text-xs font-mono text-zinc-400 bg-zinc-900/90 border border-zinc-800 px-2.5 py-1 rounded-md">
+        <div className="text-xs font-mono text-zinc-400 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-md">
           <span className="text-cyan-400 font-semibold">{formatTime(currentTimeSec)}</span>
           <span className="text-zinc-600 mx-1">/</span>
           <span>{formatTime(durationSec)}</span>
         </div>
       </div>
 
-      {/* 4. Playback Speed Selector (Right): [ 1.0x (Normal) ▾ ] */}
-      <div className="flex items-center bg-zinc-800/90 border border-zinc-700/60 rounded-xl px-3 py-1.5 gap-2 shadow-inner">
+      {/* 4. Playback Speed Selector (Right): [ ⏱️ 1.0x (Normal) ▾ ] */}
+      <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-lg px-3 py-1.5 gap-2 shadow">
         <Gauge size={15} className="text-cyan-400" />
         <select
           value={playbackRate}

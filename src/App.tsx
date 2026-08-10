@@ -24,7 +24,7 @@ import {
 } from './services/tauriBridge';
 
 import { processAudioFileInBrowser } from './utils/webAudioPitch';
-import { detectSongBpm } from './utils/audioAnalysis';
+import { detectSongBpm, LyricLine } from './utils/audioAnalysis';
 
 export default function App() {
   const [_statusMsg, setStatusMsg] = useState<string>('Karaoke Studio Ready.');
@@ -388,6 +388,9 @@ export default function App() {
     }
   };
 
+  // Lyric Lines State
+  const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
+
   // Target Pitch Frame for HUD
   const targetPitchFrame = (() => {
     if (!vocalRefTrack?.analysis?.pitch_frames) return null;
@@ -396,17 +399,18 @@ export default function App() {
   })();
 
   return (
-    <div className="w-full min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between font-sans selection:bg-cyan-500/30">
-      
-      {/* 1. Top Navigation Header Bar */}
-      <Header
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onDownloadYoutube={handleDownloadYoutube}
-        isDownloading={isDownloading}
-      />
+    <div className="w-full h-screen bg-[#141414] text-zinc-100 flex flex-col items-center justify-center p-4 md:p-6 overflow-hidden box-border">
+      <div className="w-full h-full max-w-[1800px] mx-auto flex flex-col justify-between gap-3 overflow-hidden">
+        
+        {/* 1. Top Navigation Header Bar */}
+        <Header
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onDownloadYoutube={handleDownloadYoutube}
+          isDownloading={isDownloading}
+        />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-3">
         
         {/* Section 1: Top Dual Waveform Bar Container */}
         <DualWaveformBar
@@ -423,13 +427,15 @@ export default function App() {
         />
 
         {/* Section 2: Middle Workspace Split View (2 Columns) */}
-        <main className="flex-1 p-3 grid grid-cols-12 gap-3 min-h-0 overflow-hidden">
+        <main className="flex-1 grid grid-cols-12 gap-3.5 min-h-0 overflow-hidden">
           
           {/* Left Column (40% Width - Lyrics Editor Panel) */}
           <div className="col-span-12 lg:col-span-5 h-full flex flex-col min-h-0">
             <LyricsPanel
               currentTimeSec={currentTimeSec}
               durationSec={maxDuration}
+              vocalRefTrack={vocalRefTrack}
+              onLyricsChange={setLyricLines}
               onSyncClick={() => {
                 setStatusMsg('Synced lyrics with audio timeline.');
               }}
@@ -449,6 +455,8 @@ export default function App() {
               transposeKey={transposeKey}
               overallScore={overallScore}
               targetPitchFrame={targetPitchFrame}
+              lyricLines={lyricLines}
+              bpm={bpm}
             />
           </div>
         </main>
@@ -494,5 +502,6 @@ export default function App() {
         transposeKey={transposeKey}
       />
     </div>
-  );
+  </div>
+);
 }

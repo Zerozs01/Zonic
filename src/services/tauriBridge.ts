@@ -102,3 +102,19 @@ export async function analyzeLiveStreamPitchNative(): Promise<PitchFrame | null>
   }
   return await safeInvoke<PitchFrame>('analyze_live_stream_pitch');
 }
+
+export async function setTrackGainNative(trackType: 'vocalRef' | 'instrumental', gain: number): Promise<void> {
+  await safeInvoke<void>('set_track_gain', { trackType, gain });
+}
+
+export async function setTrackMuteNative(trackType: 'vocalRef' | 'instrumental', muted: boolean): Promise<void> {
+  await safeInvoke<void>('set_track_mute', { trackType, muted });
+}
+
+export async function separateAudioStemsNative(filePath: string): Promise<string | null> {
+  return await safeInvoke<string>('separate_audio_stems', { filePath });
+}
+
+export async function forceAlignLyricsNative(vocalPath: string, rawText: string) {
+  return await safeInvoke<any[]>('align_lyrics_forced', { vocalPath, rawText });
+}

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Upload, Volume2, VolumeX } from 'lucide-react';
 import { LoadedTrack } from '../types/audio';
+import { setTrackGainNative, setTrackMuteNative } from '../services/tauriBridge';
 
 interface DualWaveformBarProps {
   vocalRefTrack: LoadedTrack | null;
@@ -34,6 +35,18 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
   const vocalCanvasRef = useRef<HTMLCanvasElement>(null);
   const instCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  const handleInstVolume = (vol: number) => {
+    onInstVolumeChange(vol);
+    setTrackGainNative('instrumental', vol).catch(() => {});
+    setTrackMuteNative('instrumental', vol === 0).catch(() => {});
+  };
+
+  const handleVocalVolume = (vol: number) => {
+    onVocalVolumeChange(vol);
+    setTrackGainNative('vocalRef', vol).catch(() => {});
+    setTrackMuteNative('vocalRef', vol === 0).catch(() => {});
+  };
+
   // Render Music (Instrumental) Waveform
   useEffect(() => {
     const canvas = instCanvasRef.current;
@@ -50,7 +63,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
     ctx.clearRect(0, 0, width, height);
 
     // Background fill
-    ctx.fillStyle = '#090d16';
+    ctx.fillStyle = '#06261c';
     ctx.fillRect(0, 0, width, height);
 
     const buffer = instrumentalTrack?.audioBuffer;
@@ -59,7 +72,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       const step = Math.ceil(data.length / width);
       const amp = height / 2;
 
-      ctx.fillStyle = '#10b981'; // Emerald Green
+      ctx.fillStyle = '#00ff88'; // Bright Neon Emerald
       for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
@@ -73,7 +86,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       }
     } else {
       // Placeholder Waveform Pattern when empty
-      ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+      ctx.fillStyle = 'rgba(0, 255, 136, 0.4)';
       for (let i = 0; i < width; i += 4) {
         const h = Math.sin(i * 0.05) * 12 + 16;
         ctx.fillRect(i, (height - h) / 2, 2, h);
@@ -97,7 +110,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
     ctx.clearRect(0, 0, width, height);
 
     // Background fill
-    ctx.fillStyle = '#120f24';
+    ctx.fillStyle = '#1e1136';
     ctx.fillRect(0, 0, width, height);
 
     const buffer = vocalRefTrack?.audioBuffer;
@@ -106,7 +119,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       const step = Math.ceil(data.length / width);
       const amp = height / 2;
 
-      ctx.fillStyle = '#a855f7'; // Violet/Purple
+      ctx.fillStyle = '#b76eff'; // Bright Neon Purple
       for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
@@ -120,9 +133,9 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       }
     } else {
       // Placeholder Waveform Pattern when empty
-      ctx.fillStyle = 'rgba(168, 85, 247, 0.25)';
+      ctx.fillStyle = 'rgba(183, 110, 255, 0.4)';
       for (let i = 0; i < width; i += 4) {
-        const h = Math.cos(i * 0.04) * 10 + 14;
+        const h = Math.cos(i * 0.05) * 12 + 16;
         ctx.fillRect(i, (height - h) / 2, 2, h);
       }
     }
@@ -145,7 +158,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
   const progressPercent = durationSec > 0 ? Math.min(100, (currentTimeSec / durationSec) * 100) : 0;
 
   return (
-    <div className="w-full bg-zinc-950 border-b border-zinc-800/80 p-2 flex flex-col gap-1.5 select-none relative">
+    <div className="w-full bg-[#1c1c1c] border border-zinc-800/80 rounded-xl p-2.5 flex flex-col gap-2 select-none relative shadow-lg shrink-0">
       <input
         type="file"
         ref={instInputRef}
@@ -162,13 +175,13 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       />
 
       {/* Row 1: Music / Instrumental Track */}
-      <div className="flex items-center gap-3 h-11 bg-zinc-900/90 rounded-lg px-3 border border-zinc-800/80 overflow-hidden">
+      <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
         {/* Left Track Control */}
         <div className="flex items-center gap-2.5 w-44 shrink-0">
           <span className="text-xs font-semibold text-emerald-400 w-12 shrink-0">Music</span>
           <button
             onClick={() => instInputRef.current?.click()}
-            className="p-1 rounded bg-zinc-800 hover:bg-emerald-950/60 hover:text-emerald-400 text-zinc-400 transition-colors cursor-pointer"
+            className="p-1 rounded bg-zinc-800 border border-emerald-500/40 hover:bg-emerald-950/80 text-emerald-400 transition-colors cursor-pointer"
             title="อัปโหลด/เปลี่ยนไฟล์เสียงดนตรี (Instrumental)"
           >
             <Upload size={14} />
@@ -177,8 +190,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
           {/* Volume Fader */}
           <div className="flex items-center gap-1 flex-1">
             <button
-              onClick={() => onInstVolumeChange(instVolume > 0 ? 0 : 0.8)}
-              className="text-zinc-500 hover:text-emerald-400"
+              onClick={() => handleInstVolume(instVolume > 0 ? 0 : 0.8)}
+              className="text-zinc-400 hover:text-emerald-400 cursor-pointer"
             >
               {instVolume === 0 ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
             </button>
@@ -188,8 +201,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
               max={1}
               step={0.01}
               value={instVolume}
-              onChange={(e) => onInstVolumeChange(parseFloat(e.target.value))}
-              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+              onChange={(e) => handleInstVolume(parseFloat(e.target.value))}
+              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-400"
             />
           </div>
         </div>
@@ -198,7 +211,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
         <div
           ref={containerRef}
           onClick={handleTimelineClick}
-          className="flex-1 h-full relative cursor-pointer overflow-hidden rounded bg-zinc-950"
+          className="flex-1 h-full relative cursor-pointer overflow-hidden rounded bg-[#06261c]"
         >
           <canvas ref={instCanvasRef} className="w-full h-full block" />
           
@@ -211,13 +224,13 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       </div>
 
       {/* Row 2: Vocal Guide Track */}
-      <div className="flex items-center gap-3 h-11 bg-zinc-900/90 rounded-lg px-3 border border-zinc-800/80 overflow-hidden">
+      <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
         {/* Left Track Control */}
         <div className="flex items-center gap-2.5 w-44 shrink-0">
           <span className="text-xs font-semibold text-purple-400 w-12 shrink-0">Vocal</span>
           <button
             onClick={() => vocalInputRef.current?.click()}
-            className="p-1 rounded bg-zinc-800 hover:bg-purple-950/60 hover:text-purple-400 text-zinc-400 transition-colors cursor-pointer"
+            className="p-1 rounded bg-zinc-800 border border-purple-500/40 hover:bg-purple-950/80 text-purple-400 transition-colors cursor-pointer"
             title="อัปโหลด/เปลี่ยนไฟล์เสียงร้อง (Vocal Guide)"
           >
             <Upload size={14} />
@@ -226,8 +239,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
           {/* Volume Fader */}
           <div className="flex items-center gap-1 flex-1">
             <button
-              onClick={() => onVocalVolumeChange(vocalVolume > 0 ? 0 : 0.7)}
-              className="text-zinc-500 hover:text-purple-400"
+              onClick={() => handleVocalVolume(vocalVolume > 0 ? 0 : 0.7)}
+              className="text-zinc-400 hover:text-purple-400 cursor-pointer"
             >
               {vocalVolume === 0 ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
             </button>
@@ -237,8 +250,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
               max={1}
               step={0.01}
               value={vocalVolume}
-              onChange={(e) => onVocalVolumeChange(parseFloat(e.target.value))}
-              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+              onChange={(e) => handleVocalVolume(parseFloat(e.target.value))}
+              className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-purple-400"
             />
           </div>
         </div>
@@ -246,7 +259,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
         {/* Waveform Viewport */}
         <div
           onClick={handleTimelineClick}
-          className="flex-1 h-full relative cursor-pointer overflow-hidden rounded bg-zinc-950"
+          className="flex-1 h-full relative cursor-pointer overflow-hidden rounded bg-[#1e1136]"
         >
           <canvas ref={vocalCanvasRef} className="w-full h-full block" />
           

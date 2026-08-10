@@ -2,8 +2,9 @@ pub mod audio;
 pub mod dsp;
 
 use audio::{
-    get_microphone_status, get_recorded_buffer, list_microphones, load_audio_file,
-    start_microphone, stop_microphone, AudioState,
+    align_lyrics_forced, get_microphone_status, get_recorded_buffer, list_microphones,
+    load_audio_file, separate_audio_stems, set_track_gain, set_track_mute, start_microphone,
+    stop_microphone, AudioState,
 };
 use dsp::{analyze_audio_file_pitch, analyze_live_stream_pitch};
 
@@ -23,6 +24,10 @@ pub fn run() {
             greet,
             list_microphones,
             load_audio_file,
+            set_track_gain,
+            set_track_mute,
+            separate_audio_stems,
+            align_lyrics_forced,
             start_microphone,
             stop_microphone,
             get_microphone_status,
