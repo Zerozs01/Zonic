@@ -399,9 +399,8 @@ export default function App() {
   })();
 
   return (
-    <div className="w-full h-screen bg-[#141414] text-zinc-100 flex flex-col items-center justify-center p-4 md:p-6 overflow-hidden box-border">
-      <div className="w-full h-full max-w-[1800px] mx-auto flex flex-col justify-between gap-3 overflow-hidden">
-        
+    <div className="root-app-viewport text-zinc-100">
+      <div className="root-app-frame">
         {/* 1. Top Navigation Header Bar */}
         <Header
           onOpenSettings={() => setIsSettingsOpen(true)}
@@ -409,76 +408,77 @@ export default function App() {
           isDownloading={isDownloading}
         />
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-3">
-        
-        {/* Section 1: Top Dual Waveform Bar Container */}
-        <DualWaveformBar
-          vocalRefTrack={vocalRefTrack}
-          instrumentalTrack={instrumentalTrack}
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-3">
+          
+          {/* Section 1: Top Dual Waveform Bar Container */}
+          <DualWaveformBar
+            vocalRefTrack={vocalRefTrack}
+            instrumentalTrack={instrumentalTrack}
+            currentTimeSec={currentTimeSec}
+            durationSec={maxDuration}
+            onSeek={handleSeek}
+            onTrackLoaded={handleTrackLoaded}
+            instVolume={instVolume}
+            onInstVolumeChange={setInstVolume}
+            vocalVolume={vocalVolume}
+            onVocalVolumeChange={setVocalVolume}
+          />
+
+          {/* Section 2: Middle Workspace Split View (Flexbox Row - 38% Lyrics, 62% Stage) */}
+          <main className="flex-1 flex flex-row items-stretch gap-3.5 min-h-0 overflow-hidden w-full">
+            
+            {/* Left Column (38% Width - Lyrics Editor Panel) */}
+            <div className="w-[38%] h-full flex flex-col min-h-0 shrink-0 overflow-hidden">
+              <LyricsPanel
+                currentTimeSec={currentTimeSec}
+                durationSec={maxDuration}
+                vocalRefTrack={vocalRefTrack}
+                onLyricsChange={setLyricLines}
+                onSyncClick={() => {
+                  setStatusMsg('Synced lyrics with audio timeline.');
+                }}
+              />
+            </div>
+
+            {/* Right Column (62% Width - Karaoke Visualizer Stage) */}
+            <div className="flex-1 h-full flex flex-col min-h-0 overflow-hidden">
+              <KaraokeVisualizerStage
+                vocalRefTrack={vocalRefTrack}
+                instrumentalTrack={instrumentalTrack}
+                currentTimeSec={currentTimeSec}
+                durationSec={maxDuration}
+                onSeek={handleSeek}
+                liveMicFrame={liveMicFrame}
+                isRecording={isRecording}
+                transposeKey={transposeKey}
+                overallScore={overallScore}
+                targetPitchFrame={targetPitchFrame}
+                lyricLines={lyricLines}
+                bpm={bpm}
+              />
+            </div>
+          </main>
+        </div>
+
+        {/* Section 3: Bottom Transport Control Bar */}
+        <KaraokeControlBar
+          isPlaying={isPlaying}
           currentTimeSec={currentTimeSec}
           durationSec={maxDuration}
+          onPlayPause={handlePlayPause}
+          onStop={stopPlayback}
           onSeek={handleSeek}
-          onTrackLoaded={handleTrackLoaded}
-          instVolume={instVolume}
-          onInstVolumeChange={setInstVolume}
-          vocalVolume={vocalVolume}
-          onVocalVolumeChange={setVocalVolume}
+          volume={volume}
+          onVolumeChange={setVolume}
+          transposeKey={transposeKey}
+          onTransposeChange={setTransposeKey}
+          playbackRate={playbackRate}
+          onPlaybackRateChange={setPlaybackRate}
+          bpm={bpm}
+          onBpmChange={setBpm}
         />
-
-        {/* Section 2: Middle Workspace Split View (2 Columns) */}
-        <main className="flex-1 grid grid-cols-12 gap-3.5 min-h-0 overflow-hidden">
-          
-          {/* Left Column (40% Width - Lyrics Editor Panel) */}
-          <div className="col-span-12 lg:col-span-5 h-full flex flex-col min-h-0">
-            <LyricsPanel
-              currentTimeSec={currentTimeSec}
-              durationSec={maxDuration}
-              vocalRefTrack={vocalRefTrack}
-              onLyricsChange={setLyricLines}
-              onSyncClick={() => {
-                setStatusMsg('Synced lyrics with audio timeline.');
-              }}
-            />
-          </div>
-
-          {/* Right Column (60% Width - Karaoke Visualizer Stage) */}
-          <div className="col-span-12 lg:col-span-7 h-full flex flex-col min-h-0">
-            <KaraokeVisualizerStage
-              vocalRefTrack={vocalRefTrack}
-              instrumentalTrack={instrumentalTrack}
-              currentTimeSec={currentTimeSec}
-              durationSec={maxDuration}
-              onSeek={handleSeek}
-              liveMicFrame={liveMicFrame}
-              isRecording={isRecording}
-              transposeKey={transposeKey}
-              overallScore={overallScore}
-              targetPitchFrame={targetPitchFrame}
-              lyricLines={lyricLines}
-              bpm={bpm}
-            />
-          </div>
-        </main>
       </div>
-
-      {/* Section 3: Bottom Transport Control Bar */}
-      <KaraokeControlBar
-        isPlaying={isPlaying}
-        currentTimeSec={currentTimeSec}
-        durationSec={maxDuration}
-        onPlayPause={handlePlayPause}
-        onStop={stopPlayback}
-        onSeek={handleSeek}
-        volume={volume}
-        onVolumeChange={setVolume}
-        transposeKey={transposeKey}
-        onTransposeChange={setTransposeKey}
-        playbackRate={playbackRate}
-        onPlaybackRateChange={setPlaybackRate}
-        bpm={bpm}
-        onBpmChange={setBpm}
-      />
 
       {/* Modals */}
       <MicSettingsModal
@@ -502,6 +502,5 @@ export default function App() {
         transposeKey={transposeKey}
       />
     </div>
-  </div>
-);
+  );
 }

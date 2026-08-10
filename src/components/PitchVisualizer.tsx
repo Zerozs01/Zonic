@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { LoadedTrack, PitchFrame } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
@@ -14,6 +14,22 @@ interface PitchVisualizerProps {
   bpm?: number;
 }
 
+interface TargetNoteBlock {
+  startTime: number;
+  endTime: number;
+  avgHz: number;
+}
+
+interface Particle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+}
+
 const SCALE_NOTES = [
   { name: 'C5', hz: 523.25 },
   { name: 'A4', hz: 440.0 },
@@ -27,51 +43,116 @@ const SCALE_NOTES = [
 
 export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   vocalRefTrack,
-  instrumentalTrack,
   currentTimeSec,
   durationSec,
   onSeek,
   liveMicFrame,
   isRecording,
   transposeKey = 0,
+  bpm = 120,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [zoomLevel, setZoomLevel] = useState<number>(1); // 1x to 5x
-  const scrollOffsetSec = Math.max(0, currentTimeSec - (durationSec / zoomLevel) / 2);
+  const [zoomLevel, setZoomLevel] = useState<number>(1.2);
+  const scrollOffsetSec = Math.max(0, currentTimeSec - (durationSec / zoomLevel) / 3);
   const isDraggingRef = useRef<boolean>(false);
 
-  // Live pitch history for live mic input with target pitch color coding
+  // Live pitch trail history
   const livePitchHistoryRef = useRef<{ timeSec: number; hz: number; color: string }[]>([]);
+  // Laser Spark Particle system
+  const particlesRef = useRef<Particle[]>([]);
 
   const getTransposedHz = (hz: number) => {
     if (hz <= 0 || transposeKey === 0) return hz;
     return hz * Math.pow(2, transposeKey / 12);
   };
 
+  // Convert raw pitch frames into WeSing horizontal note blocks
+  const targetBlocks = useMemo<TargetNoteBlock[]>(() => {
+    if (!vocalRefTrack?.analysis?.pitch_frames) return [];
+    const frames = vocalRefTrack.analysis.pitch_frames;
+    const blocks: TargetNoteBlock[] = [];
+
+    let currentBlock: { start: number; end: number; hzSum: number; count: number } | null = null;
+
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i];
+      if (!f.is_voiced || f.frequency_hz <= 0) {
+        if (currentBlock && currentBlock.count >= 2) {
+          blocks.push({
+            startTime: currentBlock.start,
+            endTime: currentBlock.end,
+            avgHz: currentBlock.hzSum / currentBlock.count,
+          });
+        }
+        currentBlock = null;
+        continue;
+      }
+
+      const tSec = f.timestamp_ms / 1000;
+      const hz = f.frequency_hz;
+
+      if (!currentBlock) {
+        currentBlock = { start: tSec, end: tSec, hzSum: hz, count: 1 };
+      } else {
+        const prevAvgHz = currentBlock.hzSum / currentBlock.count;
+        const semitoneDiff = Math.abs(12 * Math.log2(hz / prevAvgHz));
+
+        // Group into same note block if within 1.5 semitones and continuous time (<100ms gap)
+        if (semitoneDiff <= 1.5 && tSec - currentBlock.end <= 0.1) {
+          currentBlock.end = tSec;
+          currentBlock.hzSum += hz;
+          currentBlock.count += 1;
+        } else {
+          if (currentBlock.count >= 2) {
+            blocks.push({
+              startTime: currentBlock.start,
+              endTime: currentBlock.end,
+              avgHz: currentBlock.hzSum / currentBlock.count,
+            });
+          }
+          currentBlock = { start: tSec, end: tSec, hzSum: hz, count: 1 };
+        }
+      }
+    }
+
+    if (currentBlock && currentBlock.count >= 2) {
+      blocks.push({
+        startTime: currentBlock.start,
+        endTime: currentBlock.end,
+        avgHz: currentBlock.hzSum / currentBlock.count,
+      });
+    }
+
+    return blocks;
+  }, [vocalRefTrack]);
+
+  // Record live mic input pitch trail and spawn laser particles
   useEffect(() => {
     if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
-      // Find reference target pitch at current time
       let targetHz = 0;
       if (vocalRefTrack?.analysis?.pitch_frames) {
         const frames = vocalRefTrack.analysis.pitch_frames;
-        const frameIdx = Math.floor((currentTimeSec * 1000) / 10); // 10ms hop
-        if (frameIdx >= 0 && frameIdx < frames.length) {
-          const refFrame = frames[frameIdx];
-          if (refFrame.is_voiced) targetHz = getTransposedHz(refFrame.frequency_hz);
+        const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
+        if (frameIdx >= 0 && frameIdx < frames.length && frames[frameIdx].is_voiced) {
+          targetHz = getTransposedHz(frames[frameIdx].frequency_hz);
         }
       }
 
-      let pointColor = '#00f2fe'; // Default cyan
+      let pointColor = '#00f2fe';
+      let isHit = false;
+
       if (targetHz > 0) {
         const centsOffset = Math.abs(1200 * Math.log2(liveMicFrame.frequency_hz / targetHz));
         if (centsOffset <= 20) {
-          pointColor = '#10b981'; // 🟢 Green (In-Tune)
+          pointColor = '#10b981'; // Green Perfect
+          isHit = true;
         } else if (centsOffset <= 45) {
-          pointColor = '#f59e0b'; // 🟠 Orange (Slightly off)
+          pointColor = '#f59e0b'; // Amber Great
+          isHit = true;
         } else {
-          pointColor = '#ef4444'; // 🔴 Red (Off-pitch)
+          pointColor = '#ef4444'; // Red Miss
         }
       }
 
@@ -81,21 +162,37 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
         color: pointColor,
       });
 
-      if (livePitchHistoryRef.current.length > 2000) {
+      if (livePitchHistoryRef.current.length > 1500) {
         livePitchHistoryRef.current.shift();
+      }
+
+      // Spawn laser particles on hit
+      if (isHit) {
+        const particleColors = ['#f59e0b', '#10b981', '#00f2fe', '#f43f5e', '#ffffff'];
+        for (let i = 0; i < 4; i++) {
+          particlesRef.current.push({
+            x: 0, // Will be offset to playhead X in canvas render
+            y: 0,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.8) * 4,
+            size: Math.random() * 4 + 2,
+            color: particleColors[Math.floor(Math.random() * particleColors.length)],
+            alpha: 1.0,
+          });
+        }
       }
     }
   }, [liveMicFrame, currentTimeSec, vocalRefTrack]);
 
   const lastSizeRef = useRef<{ width: number; height: number; dpr: number }>({ width: 0, height: 0, dpr: 0 });
 
+  // Main Canvas Rendering Loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Handle DPI scaling matching exact container width
     const dpr = window.devicePixelRatio || 1;
     const wrapper = canvas.parentElement;
     const width = wrapper ? wrapper.getBoundingClientRect().width : 800;
@@ -113,21 +210,20 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       ctx.scale(dpr, dpr);
       lastSizeRef.current = { width, height, dpr };
     } else {
-      // Clear canvas without resetting GPU state
       ctx.clearRect(0, 0, width, height);
     }
 
-    // Clear Background with dark gradient
+    // Smooth Deep Purple / Indigo WeSing Background Gradient (Matching Image 2)
     const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
-    bgGradient.addColorStop(0, '#0b0f19');
-    bgGradient.addColorStop(1, '#111827');
+    bgGradient.addColorStop(0, '#13112b');
+    bgGradient.addColorStop(0.5, '#1e1a42');
+    bgGradient.addColorStop(1, '#0e0b1d');
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, width, height);
 
-    // Dynamic pitch boundaries (Min & Max Hz)
+    // Dynamic Pitch Bounds
     const minHz = 80;
     const maxHz = 600;
-
     const logMin = Math.log2(minHz);
     const logMax = Math.log2(maxHz);
 
@@ -145,103 +241,104 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
 
     const timeToX = (tSec: number) => {
       const norm = (tSec - startTimeSec) / visibleDuration;
-      return norm * (width - 80) + 60; // 60px left padding for note labels
+      return norm * (width - 70) + 50;
     };
 
-    // Draw Pitch Grid Lines & Note Labels
-    ctx.font = '11px Inter, sans-serif';
+    // 1. Draw Pitch Grid & Pitch Scale Labels
+    ctx.font = '10px Inter, sans-serif';
     ctx.textBaseline = 'middle';
 
     SCALE_NOTES.forEach((note) => {
       const y = hzToY(note.hz);
       if (y >= 20 && y <= height - 20) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.moveTo(60, y);
+        ctx.moveTo(50, y);
         ctx.lineTo(width, y);
         ctx.stroke();
         ctx.setLineDash([]);
 
-        ctx.fillStyle = note.name.includes('C') || note.name.includes('A') ? '#9ca3af' : '#4b5563';
-        ctx.fillText(`${note.name} (${Math.round(note.hz)}Hz)`, 10, y);
+        ctx.fillStyle = note.name.includes('C') || note.name.includes('A') ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)';
+        ctx.fillText(note.name, 12, y);
       }
     });
 
-    // Draw Time Grid Lines (Seconds)
-    const timeStepSec = visibleDuration > 30 ? 10 : visibleDuration > 10 ? 5 : 1;
-    for (let t = Math.floor(startTimeSec); t <= startTimeSec + visibleDuration; t += timeStepSec) {
+    // 2. Draw BPM Tempo Bar Grid Lines
+    const beatIntervalSec = 60 / Math.max(40, bpm);
+    for (let t = Math.floor(startTimeSec / beatIntervalSec) * beatIntervalSec; t <= startTimeSec + visibleDuration; t += beatIntervalSec) {
       const x = timeToX(t);
-      if (x >= 60 && x <= width) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+      if (x >= 50 && x <= width) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, height - 24);
+        ctx.lineTo(x, height);
         ctx.stroke();
-
-        ctx.fillStyle = '#6b7280';
-        ctx.fillText(`${t.toFixed(0)}s`, x - 8, height - 10);
       }
     }
 
-    // 1. Draw Original Vocal Guide Pitch Contour with Viewport Windowing
-    if (vocalRefTrack?.analysis?.pitch_frames) {
-      ctx.shadowColor = 'rgba(168, 85, 247, 0.6)';
-      ctx.shadowBlur = 8;
-      ctx.strokeStyle = '#a855f7';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
+    // 3. Draw WeSing Target Note Blocks (Rounded Pill Bars)
+    if (targetBlocks.length > 0) {
+      targetBlocks.forEach((block) => {
+        if (block.endTime < startTimeSec - 0.5 || block.startTime > startTimeSec + visibleDuration + 0.5) {
+          return;
+        }
 
-      let inPath = false;
-      const frames = vocalRefTrack.analysis.pitch_frames;
+        const x1 = timeToX(block.startTime);
+        const x2 = timeToX(block.endTime);
+        const barWidth = Math.max(16, x2 - x1);
+        const transposedHz = getTransposedHz(block.avgHz);
+        const y = hzToY(transposedHz);
+        const barHeight = 12;
+        const radius = 6;
 
-      // Viewport Windowing: Compute start and end frame indices (10ms hop size)
-      const startIdx = Math.max(0, Math.floor((startTimeSec - 0.5) * 100));
-      const endIdx = Math.min(frames.length - 1, Math.ceil((startTimeSec + visibleDuration + 0.5) * 100));
+        if (x1 + barWidth >= 40 && x1 <= width + 20) {
+          const isActive = currentTimeSec >= block.startTime && currentTimeSec <= block.endTime;
 
-      for (let i = startIdx; i <= endIdx; i++) {
-        const f = frames[i];
-        if (!f.is_voiced || f.frequency_hz <= 0) {
-          if (inPath) {
-            ctx.stroke();
-            ctx.beginPath();
-            inPath = false;
+          // Note Bar Gradient
+          const barGrad = ctx.createLinearGradient(x1, y - barHeight / 2, x1, y + barHeight / 2);
+          if (isActive) {
+            barGrad.addColorStop(0, '#ec4899');
+            barGrad.addColorStop(1, '#a855f7');
+            ctx.shadowColor = 'rgba(236, 72, 153, 0.8)';
+            ctx.shadowBlur = 12;
+          } else {
+            barGrad.addColorStop(0, 'rgba(168, 85, 247, 0.7)');
+            barGrad.addColorStop(1, 'rgba(99, 102, 241, 0.5)');
+            ctx.shadowColor = 'rgba(168, 85, 247, 0.3)';
+            ctx.shadowBlur = 6;
           }
-          continue;
+
+          ctx.fillStyle = barGrad;
+          ctx.beginPath();
+          ctx.roundRect(x1, y - barHeight / 2, barWidth, barHeight, radius);
+          ctx.fill();
+
+          // Border outline for active note
+          if (isActive) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+          }
+
+          ctx.shadowBlur = 0;
         }
-
-        const tSec = f.timestamp_ms / 1000;
-        const x = timeToX(tSec);
-        const y = hzToY(getTransposedHz(f.frequency_hz));
-
-        if (x < 50 || x > width + 10) continue;
-
-        if (!inPath) {
-          ctx.moveTo(x, y);
-          inPath = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-
-      if (inPath) ctx.stroke();
-      ctx.shadowBlur = 0;
+      });
     }
 
-    // 2. Draw Live Karaoke Microphone Pitch Trail (Color-Coded) with Viewport Windowing
+    // 4. Draw Live Microphone Pitch Trail
     if (livePitchHistoryRef.current.length > 0) {
       const pts = livePitchHistoryRef.current;
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
-        if (pt.timeSec < startTimeSec - 0.5 || pt.timeSec > startTimeSec + visibleDuration + 0.5) {
-          continue;
-        }
+        if (pt.timeSec < startTimeSec - 0.5 || pt.timeSec > startTimeSec + visibleDuration + 0.5) continue;
+
         const x = timeToX(pt.timeSec);
         const y = hzToY(pt.hz);
 
-        if (x >= 55 && x <= width + 10) {
+        if (x >= 45 && x <= width + 10) {
           ctx.shadowColor = pt.color;
-          ctx.shadowBlur = 10;
+          ctx.shadowBlur = 8;
           ctx.fillStyle = pt.color;
           ctx.beginPath();
           ctx.arc(x, y, 4, 0, Math.PI * 2);
@@ -251,38 +348,81 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       ctx.shadowBlur = 0;
     }
 
-    // 3. Draw Playhead Line
+    // 5. Draw Laser Playhead & Spark Particle Explosion (Matching Image 2)
     const playheadX = timeToX(currentTimeSec);
-    if (playheadX >= 60 && playheadX <= width) {
+    if (playheadX >= 50 && playheadX <= width) {
+      // Background Glow Beam Line (Electric Cyan/Blue)
+      const beamGrad = ctx.createLinearGradient(playheadX, 0, playheadX, height);
+      beamGrad.addColorStop(0, 'rgba(0, 242, 254, 0.15)');
+      beamGrad.addColorStop(0.5, 'rgba(0, 242, 254, 0.95)');
+      beamGrad.addColorStop(1, 'rgba(0, 242, 254, 0.15)');
+
+      ctx.strokeStyle = beamGrad;
+      ctx.lineWidth = 2.5;
       ctx.shadowColor = '#00f2fe';
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = '#00f2fe';
-      ctx.lineWidth = 2;
+      ctx.shadowBlur = 16;
       ctx.beginPath();
       ctx.moveTo(playheadX, 0);
-      ctx.lineTo(playheadX, height - 24);
+      ctx.lineTo(playheadX, height);
       ctx.stroke();
       ctx.shadowBlur = 0;
 
-      ctx.fillStyle = '#00f2fe';
+      // Laser Comet Head Orb at active pitch Y position
+      let activeY = height / 2;
+      if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
+        activeY = hzToY(liveMicFrame.frequency_hz);
+      } else if (vocalRefTrack?.analysis?.pitch_frames) {
+        const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
+        const targetFrame = vocalRefTrack.analysis.pitch_frames[frameIdx];
+        if (targetFrame && targetFrame.is_voiced) {
+          activeY = hzToY(getTransposedHz(targetFrame.frequency_hz));
+        }
+      }
+
+      // Glowing Comet Flare Disc (Electric Cyan/Blue)
+      const flareGrad = ctx.createRadialGradient(playheadX, activeY, 1, playheadX, activeY, 18);
+      flareGrad.addColorStop(0, '#ffffff');
+      flareGrad.addColorStop(0.3, '#00f2fe');
+      flareGrad.addColorStop(0.7, 'rgba(0, 242, 254, 0.6)');
+      flareGrad.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = flareGrad;
       ctx.beginPath();
-      ctx.moveTo(playheadX - 6, 0);
-      ctx.lineTo(playheadX + 6, 0);
-      ctx.lineTo(playheadX, 8);
-      ctx.closePath();
+      ctx.arc(playheadX, activeY, 18, 0, Math.PI * 2);
       ctx.fill();
+
+      // Render & Update Spark Particles
+      for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+        const p = particlesRef.current[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.alpha -= 0.03;
+
+        if (p.alpha <= 0) {
+          particlesRef.current.splice(i, 1);
+          continue;
+        }
+
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.beginPath();
+        ctx.arc(playheadX + p.x, activeY + p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+      }
     }
   }, [
     vocalRefTrack,
-    instrumentalTrack,
+    targetBlocks,
     currentTimeSec,
     durationSec,
     zoomLevel,
     scrollOffsetSec,
     isRecording,
     liveMicFrame,
+    transposeKey,
+    bpm,
   ]);
-
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     isDraggingRef.current = true;
@@ -310,74 +450,49 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     const visibleDuration = maxDuration / zoomLevel;
     const startTimeSec = Math.max(0, Math.min(scrollOffsetSec, maxDuration - visibleDuration));
 
-    const normX = Math.max(0, Math.min(1, (clickX - 60) / (width - 80)));
+    const normX = Math.max(0, Math.min(1, (clickX - 50) / (width - 70)));
     const targetTimeSec = startTimeSec + normX * visibleDuration;
     onSeek(Math.max(0, Math.min(durationSec, targetTimeSec)));
   };
 
   return (
-    <div className="glass-card pitch-visualizer-card minimal" ref={containerRef}>
-      <div className="card-header space-between clean">
-        <div className="header-icon-group">
-          <h3 className="card-title minimal">Pitch Contour</h3>
-          <div className="legend-group clean">
-            <span className="legend-item purple">
-              <span className="legend-dot purple-dot" /> โน๊ตทำนอง
-            </span>
-            <span className="legend-item green">
-              <span className="legend-dot green-dot" /> ตรงคีย์
-            </span>
-            <span className="legend-item orange">
-              <span className="legend-dot orange-dot" /> เพี้ยนเล็กน้อย
-            </span>
-            <span className="legend-item red">
-              <span className="legend-dot red-dot" /> หลุดคีย์
-            </span>
-          </div>
-        </div>
-
-        {/* Zoom Controls */}
-        <div className="zoom-controls clean">
-          <button
-            className="btn-zoom-clean"
-            onClick={() => setZoomLevel((z) => Math.max(1, z - 0.5))}
-            title="Zoom Out"
-          >
-            -
-          </button>
-          <span className="zoom-label-clean">{zoomLevel.toFixed(1)}x</span>
-          <button
-            className="btn-zoom-clean"
-            onClick={() => setZoomLevel((z) => Math.min(5, z + 0.5))}
-            title="Zoom In"
-          >
-            +
-          </button>
-        </div>
+    <div className="w-full h-full relative overflow-hidden flex flex-col justify-between" ref={containerRef}>
+      {/* Zoom Controls Overlay (Top Right) */}
+      <div className="absolute top-14 right-4 z-20 flex items-center bg-zinc-950/70 border border-zinc-800/80 rounded-lg px-2 py-1 gap-2 shadow-lg backdrop-blur-sm">
+        <button
+          className="text-zinc-300 hover:text-white font-bold px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors cursor-pointer text-xs"
+          onClick={() => setZoomLevel((z) => Math.max(0.8, z - 0.3))}
+          title="Zoom Out"
+        >
+          -
+        </button>
+        <span className="text-[11px] font-mono font-bold text-zinc-400">{zoomLevel.toFixed(1)}x</span>
+        <button
+          className="text-zinc-300 hover:text-white font-bold px-1.5 py-0.5 rounded hover:bg-zinc-800 transition-colors cursor-pointer text-xs"
+          onClick={() => setZoomLevel((z) => Math.min(4, z + 0.3))}
+          title="Zoom In"
+        >
+          +
+        </button>
       </div>
 
-      <div className="canvas-wrapper">
+      <div className="w-full h-full relative">
         <canvas
           ref={canvasRef}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          className="pitch-canvas"
+          className="w-full h-full cursor-pointer block"
         />
       </div>
 
       {vocalRefTrack?.analysis && (
-        <div className="canvas-footer-stats">
-          <span>
-            Original Range: <strong>{vocalRefTrack.analysis.min_pitch_hz.toFixed(0)} Hz</strong> -{' '}
-            <strong>{vocalRefTrack.analysis.max_pitch_hz.toFixed(0)} Hz</strong>
-          </span>
-          <span>
-            Original Avg Pitch: <strong>{vocalRefTrack.analysis.avg_pitch_hz.toFixed(1)} Hz</strong> ({hzToNote(vocalRefTrack.analysis.avg_pitch_hz).noteName})
-          </span>
+        <div className="absolute bottom-1 left-4 z-20 text-[10px] text-zinc-400 font-medium bg-zinc-950/60 px-2 py-0.5 rounded backdrop-blur-sm border border-zinc-800/50">
+          Range: {vocalRefTrack.analysis.min_pitch_hz.toFixed(0)} - {vocalRefTrack.analysis.max_pitch_hz.toFixed(0)} Hz ({hzToNote(vocalRefTrack.analysis.avg_pitch_hz).noteName})
         </div>
       )}
     </div>
   );
 };
+

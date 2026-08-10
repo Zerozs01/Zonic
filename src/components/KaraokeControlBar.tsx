@@ -65,7 +65,16 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
   return (
-    <footer className="w-full bg-[#1e1e1e] border border-zinc-800/80 rounded-xl px-5 py-2.5 flex items-center justify-between gap-4 select-none shrink-0 shadow-lg">
+    <footer
+      style={{
+        backgroundColor: '#19191e',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '16px',
+        padding: '10px 24px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+      }}
+      className="w-full flex items-center justify-between gap-4 select-none shrink-0"
+    >
       
       {/* 1. Key Transpose Widget (Left): [-] [🎵 Original key: x] [+] */}
       <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-md overflow-hidden shadow">

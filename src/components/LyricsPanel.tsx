@@ -101,17 +101,29 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = ({
   };
 
   return (
-    <div className="w-full h-full bg-[#242424] border border-zinc-800/80 rounded-xl flex flex-col overflow-hidden shadow-xl">
+    <div
+      style={{
+        backgroundColor: '#19191e',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '16px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+      }}
+      className="w-full h-full flex flex-col overflow-hidden"
+    >
       {/* Top Header Bar */}
-      <div className="px-4 py-3 bg-[#1e1e1e] border-b border-zinc-800/80 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+      <div
+        style={{ padding: '14px 24px' }}
+        className="bg-[#131315] border-b border-zinc-800/80 flex items-center justify-between"
+      >
+        <div className="flex items-center gap-2.5">
           <FileText size={18} className="text-zinc-300" />
           <h2 className="text-base font-bold text-white tracking-wide">Lyrics</h2>
         </div>
 
         <button
           onClick={() => setIsEditing(!isEditing)}
-          className="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer border border-zinc-700/50"
+          style={{ padding: '6px 14px' }}
+          className="rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer border border-zinc-700/50"
         >
           {isEditing ? (
             <>
@@ -128,30 +140,34 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = ({
       </div>
 
       {/* Main Body Viewport */}
-      <div className="flex-1 p-3 flex flex-col min-h-0 relative overflow-hidden bg-[#1a1a1a]">
+      <div
+        style={{ padding: '20px 24px' }}
+        className="flex-1 flex flex-col min-h-0 relative overflow-hidden bg-[#161618]"
+      >
         {isEditing ? (
-          <div className="flex-1 flex flex-col gap-2">
-            <div className="flex items-center gap-1.5 text-xs text-purple-300/80 bg-purple-950/30 px-3 py-1.5 rounded-md border border-purple-800/30">
-              <Type size={14} />
+          <div className="flex-1 flex flex-col gap-3">
+            <div className="flex items-center gap-2 text-xs text-purple-300/90 bg-purple-950/40 px-4 py-2.5 rounded-lg border border-purple-800/40">
+              <Type size={14} className="shrink-0 text-purple-400" />
               <span>ใส่เนื้อเพลงบรรทัดละ 1 ประโยค (รองรับรูปแบบ LRC [00:12.34])</span>
             </div>
             <textarea
               value={rawLyricsText}
               onChange={(e) => setRawLyricsText(e.target.value)}
               placeholder="วางเนื้อเพลงที่นี่..."
-              className="flex-1 w-full bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono resize-none leading-relaxed"
+              style={{ padding: '16px' }}
+              className="flex-1 w-full bg-zinc-900/90 border border-zinc-800 rounded-xl text-sm text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono resize-none leading-relaxed shadow-inner"
             />
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pt-1">
               <button
                 onClick={handleLoadSample}
-                className="px-2.5 py-1 text-xs text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                className="px-3.5 py-1.5 text-xs text-zinc-400 hover:text-white flex items-center gap-1.5 cursor-pointer bg-zinc-800/50 hover:bg-zinc-800 rounded-lg transition-colors border border-zinc-700/40"
               >
-                <RefreshCw size={12} />
+                <RefreshCw size={13} />
                 <span>โหลดตัวอย่าง</span>
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white transition-colors cursor-pointer"
+                className="px-5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white transition-colors cursor-pointer shadow-md"
               >
                 บันทึกเนื้อเพลง
               </button>
@@ -160,7 +176,8 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = ({
         ) : (
           <div
             ref={containerRef}
-            className="flex-1 overflow-y-auto pr-1 space-y-2 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent py-4"
+            style={{ padding: '8px 12px' }}
+            className="flex-1 overflow-y-auto space-y-3 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent"
           >
             {lyricLines.map((line, idx) => {
               const isActive = idx === activeIndex;
@@ -168,10 +185,11 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = ({
                 <div
                   key={line.id || idx}
                   ref={isActive ? activeLineRef : null}
-                  className={`px-4 py-2.5 rounded-xl transition-all duration-300 ${
+                  style={{ padding: '12px 20px', borderRadius: '12px' }}
+                  className={`transition-all duration-300 ${
                     isActive
-                      ? 'bg-gradient-to-r from-purple-900/50 via-cyan-900/40 to-transparent border-l-4 border-cyan-400 text-white font-bold scale-[1.02] shadow-lg shadow-cyan-950/50'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/40 font-medium'
+                      ? 'bg-gradient-to-r from-purple-900/60 via-cyan-900/50 to-transparent border-l-4 border-cyan-400 text-white font-bold scale-[1.02] shadow-lg shadow-cyan-950/50'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50 font-medium'
                   }`}
                 >
                   <div className="text-base tracking-wide leading-relaxed">{line.text}</div>
@@ -183,7 +201,7 @@ export const LyricsPanel: React.FC<LyricsPanelProps> = ({
       </div>
 
       {/* Prominent Bottom Action Button: SYNC */}
-      <div className="p-3 bg-zinc-950 border-t border-zinc-800/80">
+      <div style={{ padding: '16px 24px' }} className="bg-[#131315] border-t border-zinc-800/80">
         <button
           onClick={handleRunSync}
           disabled={isAligning}

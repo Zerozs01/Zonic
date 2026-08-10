@@ -158,7 +158,16 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
   const progressPercent = durationSec > 0 ? Math.min(100, (currentTimeSec / durationSec) * 100) : 0;
 
   return (
-    <div className="w-full bg-[#1c1c1c] border border-zinc-800/80 rounded-xl p-2.5 flex flex-col gap-2 select-none relative shadow-lg shrink-0">
+    <div
+      style={{
+        backgroundColor: '#19191e',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '16px',
+        padding: '10px 14px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+      }}
+      className="w-full flex flex-col gap-2 select-none relative shrink-0"
+    >
       <input
         type="file"
         ref={instInputRef}

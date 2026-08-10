@@ -25,7 +25,16 @@ export const Header: React.FC<HeaderProps> = React.memo(({
   };
 
   return (
-    <header className="w-full bg-[#1e1e1e] border border-zinc-800/80 rounded-xl px-5 py-2.5 flex items-center justify-between gap-4 shrink-0 shadow-lg">
+    <header
+      style={{
+        backgroundColor: '#19191e',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '16px',
+        padding: '10px 20px',
+        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+      }}
+      className="w-full flex items-center justify-between gap-4 shrink-0"
+    >
       {/* Left: App Logo & Side Drawer Toggle Icon */}
       <div className="flex items-center gap-3 shrink-0">
         <button

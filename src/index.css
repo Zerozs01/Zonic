@@ -15,13 +15,38 @@
 }
 
 html, body, #root {
-  width: 100%;
-  height: 100vh;
-  margin: 0;
-  padding: 0;
-  background-color: #141414;
-  overflow: hidden;
-  box-sizing: border-box;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background-color: #060608 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.root-app-viewport {
+  width: 100vw !important;
+  height: 100vh !important;
+  padding: 20px 24px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  background-color: #060608 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.root-app-frame {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 1720px !important;
+  margin: 0 auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  gap: 14px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
 }
 
 * {
