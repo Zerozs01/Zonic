@@ -71,10 +71,10 @@ flowchart TD
 
 ### 2) Frontend State & Audio Playback Orchestrator
 - **Boundary:** `src/App.tsx`, `src/hooks/*`
-- **Responsibility:** ทำหน้าที่เป็นศูนย์กลางบริหาร State ของแทร็กเสียงคู่ (Original/Backing), ค่า Gain, คีย์ดนตรี (Transpose), Speed, สถานะการบันทึกเสียง และประสานงานระหว่าง Video Sync กับ Web Audio Node
+- **Responsibility:** ทำหน้าที่เป็นศูนย์กลางบริหาร State ของแทร็กเสียงคู่ (Original/Backing), ค่า Gain, คีย์ดนตรี (Transpose), Speed, สถานะการบันทึกเสียง โดยแยกการซิงค์วิดีโอออกเป็น `src/hooks/useVideoSync.ts` และควบคุม Throttled Playhead State (~25 FPS สำหรับ DOM, 60 FPS สำหรับ Canvas Ref)
 - **Depends On:** `src/services/*`, `src/types/*`, Web Audio API, Browser LocalStorage
 - **Boundary Rules:** ควบคุมเฉพาะ In-Memory Lifecycle ในหน้าจอ UI; การคำนวณ Heavy DSP ให้ส่งต่อ Native Backend
-- **Implementation Status:** Partial (ยังผูก Logic หลายอย่างรวมอยู่ใน `App.tsx`)
+- **Implementation Status:** Partial (แยก Video Lifecycle ออกแล้ว, มีแผนสกัด Web Audio Engine Hook เพิ่มเติม)
 
 ### 3) Tauri IPC & Event Bridge
 - **Boundary:** `src/services/*`, `src-tauri/src/lib.rs`
@@ -85,10 +85,10 @@ flowchart TD
 
 ### 4) Hardware Audio & Recorder Subsystem
 - **Boundary:** `src-tauri/src/audio/*`
-- **Responsibility:** ตรวจหาอุปกรณ์ไมโครโฟนฮาร์ดแวร์ผ่าน `cpal`, บันทึกสัญญาณเสียงสดลง Ring Buffer (`AudioState`), ป้องกัน Audio Dropouts และจัดการ I/O ไฟล์เสียง
+- **Responsibility:** ตรวจหาอุปกรณ์ไมโครโฟนฮาร์ดแวร์ผ่าน `cpal`, บันทึกสัญญาณเสียงสดลง Ring Buffer ด้วย `CircularAudioBuffer` (240,000 samples คงที่, Cyclic Pointer Index), ป้องกัน Audio Dropouts และจัดการ I/O ไฟล์เสียง
 - **Depends On:** `cpal`, `hound`, `symphonia`, `parking_lot::Mutex`
-- **Boundary Rules:** Low-latency Real-time Thread ใน Audio Callback ห้ามเรียกบล็อก I/O หรือ Memory Allocation ที่ใช้เวลานาน
-- **Implementation Status:** Implemented
+- **Boundary Rules:** Low-latency Real-time Thread ใน Audio Callback ห้ามเรียกบล็อก I/O หรือ Memory Allocation ที่ใช้เวลานาน (ขจัด Heap Alloc และ Vec::drain เรียบร้อยแล้ว)
+- **Implementation Status:** Implemented (Zero-allocation Cyclic Buffer)
 
 ### 5) Native DSP & Pitch Analysis Engine
 - **Boundary:** `src-tauri/src/dsp/*`
@@ -158,7 +158,7 @@ flowchart TD
 
 ## 6. Technical Debt & Prototype Limitations
 
-- **Tight Coupling in Orchestrator (`App.tsx`):** โค้ดใน `App.tsx` มีขนาดใหญ่และทำหน้าที่เกินขอบเขต (God Component) โดยถือทั้ง React State, Audio Element Refs, Video Synchronizer และ UI Overlay Triggers ส่งผลต่อ Maintainability
+- **Tight Coupling in Orchestrator (`App.tsx`):** โค้ดใน `App.tsx` มีการผูก Logic หลายระบบ (สกัด `useVideoSync` ออกแล้วในรอบล่าสุด และมีแผนแยก `useDualAudioEngine` ใน Phase ถัดไปเพื่อความคล่องตัว)
 - **Dual Audio Engine Clock Disparity:** แทร็กเพลงเล่นผ่าน Web Audio API ใน WebView แต่สัญญาณไมโครโฟนอัดผ่าน `cpal` ใน Rust Native Core ซึ่งไม่มี Master Clock ฮาร์ดแวร์ร่วมกัน เสี่ยงต่อปัญหา Clock Drift หรือความหน่วงสะสม (Latency Jitter) ในการคำนวณ Scoring
 - **Duplicate DSP Logic:** พบการคำนวณ Pitch Algorithm ทั้งใน Rust Native Core (`src-tauri/src/dsp/`) และ JavaScript Utility (`src/utils/webAudioPitch.ts`) ซึ่งอาจให้ผลลัพธ์ไม่ตรงกันในบางกรณี
 - **Fragile IPC Contracts:** การส่งคำสั่งผ่าน Tauri String Channels หากมีการแก้ชื่อ Command หรือ Payload ฝั่งใดฝั่งหนึ่งโดยไม่มี Type Generation แบบ End-to-End อาจทำให้เกิด Silent Runtime Failure

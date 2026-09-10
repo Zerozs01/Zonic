@@ -63,7 +63,13 @@ pnpm run dev
 pnpm run vite
 ```
 
-### 4. Build & Package
+### 4. Sidecar Binaries (yt-dlp & ffmpeg)
+ไฟล์ binary สำหรับการดาวน์โหลดและแปลงไฟล์เสียง/วิดีโอถูกจัดเก็บไว้ที่ `src-tauri/binaries/`
+- เนื่องจากไฟล์ binary มีขนาดเกินเกณฑ์ 100MB ของ GitHub จึงถูกยกเว้นใน `.gitignore` เพื่อไม่ให้กระทบ Git History
+- ดูรายละเอียดและรูปแบบชื่อไฟล์ตาม Architecture Target Triple ได้ใน [`src-tauri/binaries/README.md`](file:///c:/App/Tuari/Zonic/src-tauri/binaries/README.md)
+- หากในเครื่องของผู้ใช้มี `yt-dlp` และ `ffmpeg` ติดตั้งอยู่ใน System PATH ระบบจะตรวจจับและเรียกใช้เป็น Fallback อัตโนมัติ
+
+### 5. Build & Package
 ```bash
 # Type check และ Build Frontend
 pnpm run build
@@ -74,3 +80,4 @@ pnpm tauri build
 
 ## Documentation
 - `context.md` — L1 Architecture & Feature Routing Index สำหรับ AI Coding Agents
+- `architecture.md` — High-Level Design (HLD), Data Flow, Subsystem Boundaries & State Ownership

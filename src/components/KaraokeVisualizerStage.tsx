@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { PitchVisualizer } from './PitchVisualizer';
 import { KaraokeHUD } from './KaraokeHUD';
 import { LoadedTrack, PitchFrame } from '../types/audio';
@@ -50,38 +50,157 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Synchronize HTML5 Video with Master Audio Playback
+  // Video Telemetry (Real-time measured rendered FPS & Resolution)
+  const [videoTelemetry, setVideoTelemetry] = useState<{ fps: number; resolution: string } | null>(null);
+  const frameCountRef = useRef<number>(0);
+  const lastFpsTimeRef = useRef<number>(0);
+  const callbackIdRef = useRef<number | null>(null);
+  const playPromiseRef = useRef<Promise<void> | null>(null);
+
+  // Ensure video is strictly muted and volume zero so sound never leaks or plays un-pausably
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.defaultMuted = true;
+      videoRef.current.muted = true;
+      videoRef.current.volume = 0;
+    }
+  }, [videoUrl]);
+
+  // Measure Real Video FPS & Resolution via requestVideoFrameCallback
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoUrl) {
+      setVideoTelemetry(null);
+      return;
+    }
+
+    const updateMeta = () => {
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        setVideoTelemetry((prev) => ({
+          fps: prev?.fps || 0,
+          resolution: `${video.videoWidth}x${video.videoHeight}`,
+        }));
+      }
+    };
+
+    video.addEventListener('loadedmetadata', updateMeta);
+    if (video.readyState >= 1) updateMeta();
+
+    let isSubscribed = true;
+    frameCountRef.current = 0;
+    lastFpsTimeRef.current = performance.now();
+
+    const onFrame = (now: DOMHighResTimeStamp) => {
+      if (!isSubscribed) return;
+      frameCountRef.current++;
+      const elapsed = now - lastFpsTimeRef.current;
+      if (elapsed >= 1000) {
+        const measuredFps = Math.round((frameCountRef.current * 1000) / elapsed);
+        setVideoTelemetry((prev) => ({
+          fps: measuredFps,
+          resolution: prev?.resolution || (video.videoWidth ? `${video.videoWidth}x${video.videoHeight}` : 'HD'),
+        }));
+        frameCountRef.current = 0;
+        lastFpsTimeRef.current = now;
+      }
+      if ('requestVideoFrameCallback' in video) {
+        callbackIdRef.current = (video as any).requestVideoFrameCallback(onFrame);
+      }
+    };
+
+    if ('requestVideoFrameCallback' in video) {
+      callbackIdRef.current = (video as any).requestVideoFrameCallback(onFrame);
+    }
+
+    return () => {
+      isSubscribed = false;
+      video.removeEventListener('loadedmetadata', updateMeta);
+      if (callbackIdRef.current !== null && 'cancelVideoFrameCallback' in video) {
+        (video as any).cancelVideoFrameCallback(callbackIdRef.current);
+      }
+    };
+  }, [videoUrl]);
+
+  // Synchronize HTML5 Video Play / Pause with Master Audio Engine
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
 
+    video.defaultMuted = true;
+    video.muted = true;
+    video.volume = 0;
+
     if (isPlaying) {
-      video.play().catch((err) => {
-        // Autoplay may be deferred until user interaction
-        console.warn('[VideoStage] Video play deferred:', err);
-      });
+      // Align position on play start if difference is noticeable (> 0.08s)
+      if (Math.abs(video.currentTime - currentTimeSec) > 0.08) {
+        video.currentTime = currentTimeSec;
+      }
+      const p = video.play();
+      playPromiseRef.current = p;
+      if (p !== undefined) {
+        p.catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.warn('[VideoStage] Video play deferred:', err);
+          }
+        });
+      }
     } else {
-      video.pause();
+      // Safely pause even if play() promise is still resolving
+      if (playPromiseRef.current) {
+        playPromiseRef.current
+          .then(() => {
+            video.pause();
+          })
+          .catch(() => {
+            video.pause();
+          });
+      } else {
+        video.pause();
+      }
+      if (Math.abs(video.currentTime - currentTimeSec) > 0.05) {
+        video.currentTime = currentTimeSec;
+      }
     }
   }, [isPlaying, videoUrl]);
 
-  // Synchronize Video Playback Rate
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.playbackRate = playbackRate;
-    }
-  }, [playbackRate]);
-
-  // Synchronize Video Seek Position
+  // High-Precision Smooth Synchronization (Phase-Locked Loop without judder or hard-seeking)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
 
-    // Only update if difference is noticeable (> 0.25s) to prevent jitter
-    if (Math.abs(video.currentTime - currentTimeSec) > 0.25) {
-      video.currentTime = currentTimeSec;
+    if (!isPlaying) {
+      if (!video.paused) {
+        video.pause();
+      }
+      // When paused, snap directly to scrubbed position
+      if (Math.abs(video.currentTime - currentTimeSec) > 0.05) {
+        video.currentTime = currentTimeSec;
+      }
+      return;
     }
-  }, [currentTimeSec, videoUrl]);
+
+
+    const drift = currentTimeSec - video.currentTime;
+    const absDrift = Math.abs(drift);
+
+    // 1. Hard seek ONLY on large desync (> 1.2s, e.g. user seek jump)
+    if (absDrift > 1.2) {
+      video.currentTime = currentTimeSec;
+      video.playbackRate = playbackRate;
+      return;
+    }
+
+    // 2. Micro-drift (0.06s - 1.2s): Smoothly nudge playbackRate without dropping frames
+    if (absDrift > 0.06) {
+      const nudge = drift > 0 ? 1.04 : 0.96;
+      video.playbackRate = playbackRate * nudge;
+    } else {
+      // 3. In sync (within 60ms): Lock at target playbackRate
+      if (video.playbackRate !== playbackRate) {
+        video.playbackRate = playbackRate;
+      }
+    }
+  }, [currentTimeSec, isPlaying, playbackRate, videoUrl]);
 
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0 && onAttachVideo) {
@@ -149,6 +268,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               transposeKey={transposeKey}
               currentTimeSec={currentTimeSec}
               durationSec={durationSec}
+              isPlaying={isPlaying}
             />
           </div>
 
@@ -158,22 +278,22 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               <button
                 type="button"
                 onClick={() => onViewModeChange(viewMode === 'stage' ? 'video' : 'stage')}
-                className={`p-1.5 rounded-lg border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
                   viewMode === 'video'
-                    ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-200 hover:bg-cyan-900/80'
-                    : 'bg-purple-950/80 border-purple-500/60 text-purple-200 hover:bg-purple-900/80'
+                    ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-200 hover:bg-cyan-900/80 hover:border-cyan-400'
+                    : 'bg-purple-950/80 border-purple-500/60 text-purple-200 hover:bg-purple-900/80 hover:border-purple-400'
                 }`}
                 title={viewMode === 'stage' ? 'สลับไปโหมดวิดีโอคาราโอเกะ' : 'สลับไปโหมดกราฟคะแนน'}
               >
                 {viewMode === 'stage' ? (
                   <>
                     <Video size={13} className="text-cyan-400" />
-                    <span className="hidden xl:inline">สลับเป็นวิดีโอ</span>
+                    <span>สลับเป็นวิดีโอ</span>
                   </>
                 ) : (
                   <>
                     <Activity size={13} className="text-purple-400" />
-                    <span className="hidden xl:inline">สลับเป็นคะแนน</span>
+                    <span>สลับเป็นคะแนน</span>
                   </>
                 )}
               </button>
@@ -183,7 +303,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
 
         {/* ── Mode 1: Pitch Roll Canvas Stage ── */}
         {viewMode === 'stage' && (
-          <div className="w-full h-full relative z-10 pt-16 pb-16">
+          <div className="w-full flex-1 relative overflow-hidden">
             <PitchVisualizer
               vocalRefTrack={vocalRefTrack}
               instrumentalTrack={instrumentalTrack}
@@ -194,6 +314,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               isRecording={isRecording}
               transposeKey={transposeKey}
               bpm={bpm}
+              isPlaying={isPlaying}
             />
           </div>
         )}
@@ -206,13 +327,32 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
             onDrop={handleVideoDrop}
           >
             {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                muted
-                playsInline
-                className="w-full h-full object-contain pointer-events-none"
-              />
+              <>
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  muted
+                  playsInline
+                  style={{
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    willChange: 'transform',
+                  }}
+                  className="w-full h-full object-contain pointer-events-none"
+                />
+
+                {/* Real-time Video Telemetry Overlay Badge (Resolution & Measured Render FPS) */}
+                {videoTelemetry && (
+                  <div className="absolute top-16 left-4 z-20 flex items-center gap-2 bg-zinc-950/75 border border-zinc-800/80 rounded-lg px-2.5 py-1 text-[11px] font-mono text-zinc-300 backdrop-blur-md shadow-lg pointer-events-none select-none">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>{videoTelemetry.resolution}</span>
+                    <span className="text-zinc-500">•</span>
+                    <span className="text-cyan-300 font-bold">
+                      {videoTelemetry.fps > 0 ? `${videoTelemetry.fps} FPS` : 'Detecting FPS...'}
+                    </span>
+                  </div>
+                )}
+              </>
             ) : (
               <div
                 onClick={() => videoFileInputRef.current?.click()}

@@ -12,6 +12,7 @@ interface PitchVisualizerProps {
   isRecording: boolean;
   transposeKey?: number;
   bpm?: number;
+  isPlaying?: boolean;
 }
 
 interface TargetNoteBlock {
@@ -50,6 +51,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
   isRecording,
   transposeKey = 0,
   bpm = 120,
+  isPlaying = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -129,13 +131,22 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     return blocks;
   }, [vocalRefTrack]);
 
+  const currentTimeSecRef = useRef<number>(currentTimeSec);
+  currentTimeSecRef.current = currentTimeSec;
+
+  const vocalRefTrackRef = useRef<LoadedTrack | null>(vocalRefTrack);
+  vocalRefTrackRef.current = vocalRefTrack;
+
   // Record live mic input pitch trail and spawn laser particles
   useEffect(() => {
+    if (!isPlaying) return;
     if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
+      const currentT = currentTimeSecRef.current;
+      const currentTrack = vocalRefTrackRef.current;
       let targetHz = 0;
-      if (vocalRefTrack?.analysis?.pitch_frames) {
-        const frames = vocalRefTrack.analysis.pitch_frames;
-        const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
+      if (currentTrack?.analysis?.pitch_frames) {
+        const frames = currentTrack.analysis.pitch_frames;
+        const frameIdx = Math.floor((currentT * 1000) / 10);
         if (frameIdx >= 0 && frameIdx < frames.length && frames[frameIdx].is_voiced) {
           targetHz = getTransposedHz(frames[frameIdx].frequency_hz);
         }
@@ -158,13 +169,14 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       }
 
       livePitchHistoryRef.current.push({
-        timeSec: currentTimeSec,
+        timeSec: currentT,
         hz: liveMicFrame.frequency_hz,
         color: pointColor,
       });
 
+      // Avoid O(N) Array.shift() on every frame — prune in batches
       if (livePitchHistoryRef.current.length > 1500) {
-        livePitchHistoryRef.current.shift();
+        livePitchHistoryRef.current = livePitchHistoryRef.current.slice(-1200);
       }
 
       // Spawn laser particles on hit
@@ -183,7 +195,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
         }
       }
     }
-  }, [liveMicFrame, currentTimeSec, vocalRefTrack]);
+  }, [liveMicFrame, isPlaying]);
 
   const lastSizeRef = useRef<{ width: number; height: number; dpr: number }>({ width: 0, height: 0, dpr: 0 });
 
@@ -391,9 +403,11 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       // Render & Update Spark Particles
       for (let i = particlesRef.current.length - 1; i >= 0; i--) {
         const p = particlesRef.current[i];
-        p.x += p.vx;
-        p.y += p.vy;
-        p.alpha -= 0.03;
+        if (isPlaying) {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.alpha -= 0.03;
+        }
 
         if (p.alpha <= 0) {
           particlesRef.current.splice(i, 1);
@@ -420,6 +434,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     liveMicFrame,
     transposeKey,
     bpm,
+    isPlaying,
   ]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {

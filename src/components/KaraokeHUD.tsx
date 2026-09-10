@@ -11,6 +11,7 @@ interface KaraokeHUDProps {
   transposeKey?: number;
   currentTimeSec?: number;
   durationSec?: number;
+  isPlaying?: boolean;
 }
 
 const GRADES = ['C', 'B', 'A', 'S', 'SS', 'SSS'];
@@ -23,6 +24,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   transposeKey = 0,
   currentTimeSec = 0,
   durationSec = 0,
+  isPlaying = false,
 }) => {
   const formatTime = (sec: number) => {
     if (isNaN(sec) || sec <= 0) return '00:00';
@@ -43,6 +45,16 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   const gradeInfo = getGradeInfo(overallScore);
 
   const getPitchComparison = () => {
+    if (!isPlaying) {
+      return {
+        targetNote: targetPitchFrame?.is_voiced ? targetPitchFrame.note_name : '---',
+        userNote: '---',
+        statusText: 'หยุดชั่วคราว',
+        hitText: '',
+        colorClass: 'bg-zinc-900/80 border-zinc-700/60 text-zinc-400',
+      };
+    }
+
     if (!targetPitchFrame || !targetPitchFrame.is_voiced || targetPitchFrame.frequency_hz <= 0) {
       return {
         targetNote: '---',
@@ -168,9 +180,9 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
         
         {/* Top-Left: Recording status & timestamp tag e.g. "บันทึก 00:59" */}
         <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 backdrop-blur-sm rounded-full px-3 py-0.5 text-zinc-300">
-          <span className={`w-2 h-2 rounded-full ${isRecording ? 'bg-red-500 animate-ping' : 'bg-zinc-500'}`} />
+          <span className={`w-2 h-2 rounded-full ${isRecording && isPlaying ? 'bg-red-500 animate-ping' : isRecording ? 'bg-amber-500' : 'bg-zinc-500'}`} />
           <span className="font-medium text-[11px]">
-            {isRecording ? 'บันทึก' : 'พร้อม'} {formatTime(currentTimeSec)}
+            {isRecording && isPlaying ? 'บันทึก' : !isPlaying ? 'หยุดชั่วคราว' : 'พร้อม'} {formatTime(currentTimeSec)}
           </span>
         </div>
 

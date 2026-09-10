@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Download, Settings, Loader2, ListMusic, Scissors, Activity, Video } from 'lucide-react';
+import { Menu, Download, Settings, Loader2, ListMusic, Scissors } from 'lucide-react';
 import { AudioFormat } from '../types/downloader';
 
 interface HeaderProps {
@@ -9,9 +9,6 @@ interface HeaderProps {
   onDownloadYoutube?: (url: string, format: AudioFormat) => void;
   isDownloading?: boolean;
   activeDownloadCount?: number;
-  viewMode?: 'stage' | 'video';
-  onViewModeChange?: (mode: 'stage' | 'video') => void;
-  hasVideo?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = React.memo(({
@@ -21,12 +18,9 @@ export const Header: React.FC<HeaderProps> = React.memo(({
   onDownloadYoutube,
   isDownloading = false,
   activeDownloadCount = 0,
-  viewMode = 'stage',
-  onViewModeChange,
-  hasVideo = false,
 }) => {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
-  const [format, setFormat] = useState<AudioFormat>('flac');
+  const [format, setFormat] = useState<AudioFormat>('mp4');
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
 
   const handleDownload = (e?: React.FormEvent) => {
@@ -45,14 +39,14 @@ export const Header: React.FC<HeaderProps> = React.memo(({
     <header
       style={{
         backgroundColor: '#19191e',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        borderRadius: '16px',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '0',
         padding: '10px 20px',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+        boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)',
       }}
-      className="w-full flex items-center justify-between gap-4 shrink-0"
+      className="w-full flex items-center justify-between gap-4 shrink-0 sticky top-0 z-30"
     >
-      {/* Left: App Menu & View Mode Toggle (Score vs Video) in Red-Box Spot */}
+      {/* Left: App Menu Button */}
       <div className="flex items-center gap-3 shrink-0">
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -61,42 +55,6 @@ export const Header: React.FC<HeaderProps> = React.memo(({
         >
           <Menu size={20} />
         </button>
-
-        {/* View Mode Toggle: [ 📊 หน้าจอคะแนน ] [ 🎬 ภาพวิดีโอ ] */}
-        {onViewModeChange && (
-          <div className="flex items-center bg-[#22222a] border border-zinc-700/80 rounded-xl p-1 shadow-inner gap-1">
-            <button
-              type="button"
-              onClick={() => onViewModeChange('stage')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'stage'
-                  ? 'bg-purple-600/90 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-              }`}
-              title="สลับเป็นหน้าจอคะแนนและการเทียบเสียง (Score & Pitch Roll)"
-            >
-              <Activity size={14} className={viewMode === 'stage' ? 'text-white' : 'text-purple-400'} />
-              <span className="hidden md:inline">หน้าจอคะแนน</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onViewModeChange('video')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer relative ${
-                viewMode === 'video'
-                  ? 'bg-cyan-600/90 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)]'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-              }`}
-              title="สลับเป็นภาพวิดีโอคาราโอเกะ (Karaoke Video Player)"
-            >
-              <Video size={14} className={viewMode === 'video' ? 'text-white' : 'text-cyan-400'} />
-              <span className="hidden md:inline">ภาพวิดีโอ</span>
-              {hasVideo && (
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse ml-0.5" title="มีวิดีโอพร้อมเล่น" />
-              )}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Center: Wide YouTube URL Input Box with Format Selector Dropdown & Download Button */}
@@ -121,7 +79,7 @@ export const Header: React.FC<HeaderProps> = React.memo(({
           <option value="flac">FLAC</option>
           <option value="mp3">MP3</option>
           <option value="wav">WAV</option>
-          <option value="mp4">MP4 (Video)</option>
+          <option value="mp4">MP4 🎬 (Video)</option>
         </select>
 
         {/* Download Action Button */}

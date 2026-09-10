@@ -9,6 +9,8 @@ import {
   ChevronUp,
   ChevronDown,
   Gauge,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 
 interface KaraokeControlBarProps {
@@ -20,6 +22,10 @@ interface KaraokeControlBarProps {
   onSeek: (timeSec: number) => void;
   volume: number;
   onVolumeChange: (vol: number) => void;
+
+  // Microphone state & toggle
+  isRecording?: boolean;
+  onToggleMic?: () => void;
 
   // Pitch Transpose (-6 to +6 semitones)
   transposeKey: number;
@@ -70,6 +76,8 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = React.memo(({
   onPlaybackRateChange,
   bpm,
   onBpmChange,
+  isRecording = false,
+  onToggleMic,
 }) => {
   const formatTime = (sec: number) => {
     if (isNaN(sec) || sec <= 0) return '00:00';
@@ -87,12 +95,12 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = React.memo(({
     <footer
       style={{
         backgroundColor: '#19191e',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        borderRadius: '16px',
+        borderTop: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: '0',
         padding: '10px 24px',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
+        boxShadow: '0 -4px 20px rgba(0, 0, 0, 0.4)',
       }}
-      className="w-full flex items-center justify-between gap-4 select-none shrink-0"
+      className="w-full flex items-center justify-between gap-4 select-none shrink-0 sticky bottom-0 z-30"
     >
       
       {/* 1. Key Transpose Widget (Left): [-] [🎵 Original key: x] [+] */}
@@ -149,8 +157,26 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = React.memo(({
         </div>
       </div>
 
-      {/* 3. Primary Transport Playback Controls (Center): [Stop], [Play/Pause], [Replay] */}
-      <div className="flex items-center gap-4">
+      {/* 3. Primary Transport Playback Controls (Center): [Mic Toggle], [Stop], [Play/Pause], [Replay] */}
+      <div className="flex items-center gap-3">
+        {/* Quick Microphone On/Off Toggle Button */}
+        {onToggleMic && (
+          <button
+            onClick={(e) => {
+              (e.currentTarget as HTMLButtonElement).blur();
+              onToggleMic();
+            }}
+            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all cursor-pointer shadow border ${
+              isRecording
+                ? 'bg-rose-600 hover:bg-rose-500 border-rose-500 text-white shadow-[0_0_12px_rgba(244,63,94,0.5)] animate-pulse'
+                : 'bg-[#333333] border-zinc-700/80 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200'
+            }`}
+            title={isRecording ? 'คลิกเพื่อปิดไมโครโฟน (ไมค์กำลังทำงาน)' : 'คลิกเพื่อเปิดไมโครโฟน (ไมค์ปิดอยู่)'}
+          >
+            {isRecording ? <Mic size={17} /> : <MicOff size={17} />}
+          </button>
+        )}
+
         {/* Stop Button */}
         <button
           onClick={onStop}
@@ -162,7 +188,10 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = React.memo(({
 
         {/* Big Bright White Circular Play / Pause Button */}
         <button
-          onClick={onPlayPause}
+          onClick={(e) => {
+            (e.currentTarget as HTMLButtonElement).blur();
+            onPlayPause();
+          }}
           className={`w-14 h-14 rounded-full flex items-center justify-center transition-all cursor-pointer shadow-xl ${
             isPlaying
               ? 'bg-amber-500 hover:bg-amber-400 text-zinc-900'

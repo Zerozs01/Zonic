@@ -15,11 +15,11 @@ User -> React UI -> Hook/Service -> Tauri IPC -> Rust Audio Core / DSP / Sidecar
 
 ## 3. Directory Map (Critical Only)
 `src/components/` -> UI Components หลักสำหรับเวทีคาราโอเกะ มิกเซอร์เสียง การซิงค์เนื้อเพลง และหน้าต่างควบคุม
-`src/hooks/` -> Custom React Hooks สำหรับจัดการ Downloader Queue, Demucs Splitter, Lyrics Sync, Hotkeys และ Scoring
+`src/hooks/` -> Custom React Hooks สำหรับจัดการ Downloader Queue, Demucs Splitter, Lyrics Sync, Hotkeys, Scoring และ Video Sync
 `src/services/` -> โมดูลเรียก Tauri IPC Commands และดักรับ Event Streams จาก Rust Backend
 `src/types/` -> Type Definitions และ Data Contracts ฝั่ง Frontend ทั้งหมด
 `src/utils/` -> ฟังก์ชันช่วยคำนวณ Audio DSP fallback (YIN), ถอดรหัส LRC/BPM, และแปลง Hz เป็นโน้ตดนตรี
-`src-tauri/src/audio/` -> ดึงสัญญาณไมโครโฟนฮาร์ดแวร์ผ่าน cpal, บริหาร Ring Buffer, และ I/O ไฟล์เสียง
+`src-tauri/src/audio/` -> ดึงสัญญาณไมโครโฟนฮาร์ดแวร์ผ่าน cpal, บริหาร Circular Audio Buffer, และ I/O ไฟล์เสียง
 `src-tauri/src/downloader/` -> ควบคุม Process yt-dlp สำหรับดาวน์โหลดเสียง/วิดีโอ และสแกนคลังเพลง Local
 `src-tauri/src/dsp/` -> Rust Native YIN Pitch Algorithm, Audio Filtering, และ Real-time Live Stream Analysis
 `src-tauri/src/lyrics/` -> ระบบ Forced Alignment ซิงค์คำร้องเข้ากับไทม์ไลน์เสียง
@@ -33,7 +33,7 @@ User -> React UI -> Hook/Service -> Tauri IPC -> Rust Audio Core / DSP / Sidecar
 - Canvas Pitch Graph & Visualizer
   - Primary: `src/components/PitchVisualizer.tsx`
   - Secondary: `src/components/KaraokeVisualizerStage.tsx`, `src/utils/webAudioPitch.ts`
-  - Scope: เรนเดอร์ Pitch Note Blocks และ Laser Beam บน Canvas 60FPS
+  - Scope: เรนเดอร์ Pitch Note Blocks และ Laser Beam บน Canvas 60FPS (ประมวลผล Trail ผ่าน Ref)
 - Live Mic Pitch Scoring
   - Primary: `src/hooks/useLivePitchScoring.ts`
   - Secondary: `src/components/KaraokeHUD.tsx`, `src/components/PerformanceModal.tsx`, `src-tauri/src/dsp/analyzer.rs`
@@ -55,14 +55,14 @@ User -> React UI -> Hook/Service -> Tauri IPC -> Rust Audio Core / DSP / Sidecar
   - Secondary: `src/components/LyricsPanel.tsx`, `src-tauri/src/lyrics/mod.rs`, `src/services/lyricsService.ts`
   - Scope: แสดงผล แก้ไข LRC และทำ AI Forced Alignment
 - Video Player Synchronization
-  - Primary: `src/components/KaraokeVisualizerStage.tsx`
-  - Secondary: `src/App.tsx`, `src/components/Header.tsx`
-  - Scope: ซิงค์วิดีโอ MP4 ให้ตรงกับ Web Audio Timeline
+  - Primary: `src/hooks/useVideoSync.ts`
+  - Secondary: `src/components/KaraokeVisualizerStage.tsx`, `src/App.tsx`
+  - Scope: ซิงค์วิดีโอ MP4, ควบคุม URL Blob/Asset และสลับโหมด Stage/Video
 
 ## 5. High-Risk & Coupling Zones
 - Shared State / Types: `src/types/audio.ts` -> กระทบ: `src/App.tsx`, `src/services/tauriBridge.ts` และโครงสร้าง Audio Engine ทั้งระบบ
 - API Contracts / IPC Channels: `src-tauri/src/lib.rs` -> กระทบ: `src/services/tauriBridge.ts` และ Services ทั้งหมด หาก signature หรือ event payload เปลี่ยนจะเกิด silent runtime failure
-- Real-time Audio Ring Buffer: `src-tauri/src/audio/recorder.rs` -> กระทบ: Native DSP Analyzer เสี่ยงเจอปัญหา Audio Glitch หรือ Mutex Deadlock
+- Real-time Audio Ring Buffer: `src-tauri/src/audio/recorder.rs` (`CircularAudioBuffer`) -> กระทบ: Native DSP Analyzer บริหารหน่วยความจำแบบ Cyclic ป้องกัน Glitch และ Mutex Contention
 - Database Schema / Migrations: `localStorage ('zonic_download_queue_v1')` & App FS -> ข้อควรระวัง: โครงสร้างข้อมูลคิวดาวน์โหลดและ Path สื่อ หากปรับ Format ต้องมี Fallback ป้องกันค้าง
 
 ## 6. Agent Navigation Rules

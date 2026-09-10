@@ -278,14 +278,14 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       {/* Row 1: Music / Instrumental Track */}
       <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
         {/* Left Track Control & Mute/Solo */}
-        <div className="flex items-center gap-2 w-60 shrink-0">
-          <div className="flex items-center gap-1.5 w-20 shrink-0">
+        <div className="flex items-center gap-2 w-64 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <Music2 size={13} className="text-emerald-400 shrink-0" />
             <span
-              className="text-xs font-semibold text-emerald-400 truncate"
+              className="text-xs font-semibold text-emerald-400"
               title={instrumentalTrack?.name || 'Music (Instrumental)'}
             >
-              {instrumentalTrack ? 'Music' : 'Music'}
+              Music
             </span>
           </div>
 
@@ -324,19 +324,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
             <Upload size={13} />
           </button>
 
-          {/* Clear Track Button */}
-          {instrumentalTrack && onClearTrack && (
-            <button
-              onClick={() => onClearTrack('instrumental')}
-              className="p-1 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/70 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0"
-              title="เอาแทร็กเสียงดนตรีออก (Clear Track)"
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
-
           {/* Volume Fader */}
-          <div className="flex items-center gap-1 flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
             <button
               onClick={toggleInstMute}
               className="text-zinc-400 hover:text-emerald-400 cursor-pointer shrink-0"
@@ -369,19 +358,34 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
             style={{ left: `${progressPercent}%` }}
           />
         </div>
+
+        {/* Right Side: Clear Track Button */}
+        {instrumentalTrack && onClearTrack && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClearTrack('instrumental');
+            }}
+            className="p-1.5 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/80 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0 shadow-sm"
+            title="เอาแทร็กเสียงดนตรีออก (Clear Track)"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
 
       {/* Row 2: Vocal Guide Track */}
       <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
         {/* Left Track Control & Mute/Solo */}
-        <div className="flex items-center gap-2 w-60 shrink-0">
-          <div className="flex items-center gap-1.5 w-20 shrink-0">
+        <div className="flex items-center gap-2 w-64 shrink-0">
+          <div className="flex items-center gap-1 shrink-0">
             <Mic size={13} className="text-purple-400 shrink-0" />
             <span
-              className="text-xs font-semibold text-purple-400 truncate"
+              className="text-xs font-semibold text-purple-400"
               title={vocalRefTrack?.name || 'Vocal Guide'}
             >
-              {vocalRefTrack ? 'Vocal' : 'Vocal'}
+              Vocal
             </span>
           </div>
 
@@ -420,19 +424,8 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
             <Upload size={13} />
           </button>
 
-          {/* Clear Track Button */}
-          {vocalRefTrack && onClearTrack && (
-            <button
-              onClick={() => onClearTrack('vocalRef')}
-              className="p-1 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/70 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0"
-              title="เอาแทร็กเสียงร้องออก (Clear Track)"
-            >
-              <Trash2 size={13} />
-            </button>
-          )}
-
           {/* Volume Fader */}
-          <div className="flex items-center gap-1 flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
             <button
               onClick={toggleVocalMute}
               className="text-zinc-400 hover:text-purple-400 cursor-pointer shrink-0"
@@ -464,6 +457,21 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
             style={{ left: `${progressPercent}%` }}
           />
         </div>
+
+        {/* Right Side: Clear Track Button */}
+        {vocalRefTrack && onClearTrack && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClearTrack('vocalRef');
+            }}
+            className="p-1.5 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/80 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0 shadow-sm"
+            title="เอาแทร็กเสียงร้องออก (Clear Track)"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
     </div>
   );

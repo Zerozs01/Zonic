@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { DualWaveformBar } from './components/DualWaveformBar';
 import { LyricsPanel } from './components/LyricsPanel';
@@ -12,6 +12,7 @@ import { useAudioDownloaderQueue } from './hooks/useAudioDownloaderQueue';
 import { useStemSplitter } from './hooks/useStemSplitter';
 import { useGlobalHotkeys } from './hooks/useGlobalHotkeys';
 import { useLivePitchScoring } from './hooks/useLivePitchScoring';
+import { useVideoSync } from './hooks/useVideoSync';
 import { AudioFormat } from './types/downloader';
 
 import { Scissors, X } from 'lucide-react';
@@ -33,7 +34,7 @@ import {
   stopMicStream,
 } from './services/tauriBridge';
 
-import { processAudioFileInBrowser } from './utils/webAudioPitch';
+import { processAudioFileInBrowser, extractPitchFramesFromAudioBuffer } from './utils/webAudioPitch';
 import { detectSongBpm, LyricLine } from './utils/audioAnalysis';
 
 export default function App() {
@@ -50,39 +51,15 @@ export default function App() {
   const [instrumentalTrack, setInstrumentalTrack] = useState<LoadedTrack | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
 
-  // Visualizer View Mode: 'stage' (Pitch Score & HUD) vs 'video' (Karaoke Video Player)
-  const [viewMode, setViewMode] = useState<'stage' | 'video'>('stage');
-  const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null);
-  const prevVideoUrlRef = useRef<string | null>(null);
-
-  // Safely set video URL and revoke previous blob URLs to prevent memory leaks
-  const setCleanVideoUrl = useCallback((newUrl: string | null) => {
-    if (prevVideoUrlRef.current && prevVideoUrlRef.current.startsWith('blob:')) {
-      try {
-        URL.revokeObjectURL(prevVideoUrlRef.current);
-      } catch (e) {}
-    }
-    prevVideoUrlRef.current = newUrl;
-    setCurrentVideoUrl(newUrl);
-  }, []);
-
-  // Cleanup any lingering blob URL on unmount
-  useEffect(() => {
-    return () => {
-      if (prevVideoUrlRef.current && prevVideoUrlRef.current.startsWith('blob:')) {
-        try {
-          URL.revokeObjectURL(prevVideoUrlRef.current);
-        } catch (e) {}
-      }
-    };
-  }, []);
-
-  // Check if filename or path is a supported video format
-  const isVideoFile = (filenameOrPath?: string | null): boolean => {
-    if (!filenameOrPath) return false;
-    const lower = filenameOrPath.toLowerCase();
-    return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mkv') || lower.endsWith('.mov');
-  };
+  // Visualizer View Mode & Video Synchronization
+  const {
+    viewMode,
+    setViewMode,
+    currentVideoUrl,
+    setCleanVideoUrl,
+    isVideoFile,
+    handleAttachVideo,
+  } = useVideoSync((msg) => setStatusMsg(msg));
 
   // Individual Track Volumes
   const [instVolume, setInstVolume] = useState<number>(0.8);
@@ -90,12 +67,27 @@ export default function App() {
 
   // Playback & Master Volume State
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const isPlayingRef = useRef<boolean>(false);
   const [currentTimeSec, setCurrentTimeSec] = useState<number>(0);
   const currentTimeSecRef = useRef<number>(0);
   const [volume, setVolume] = useState<number>(0.8);
   const playbackAnimRef = useRef<number | null>(null);
   const playbackStartTimeRef = useRef<number>(0);
   const playbackStartOffsetRef = useRef<number>(0);
+
+  // Draggable Lyrics Studio Width State (Default 32%, range 15% - 60%)
+  const [lyricsWidthPercent, setLyricsWidthPercent] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('zonic_lyrics_width');
+      if (saved) {
+        const parsed = parseFloat(saved);
+        if (!isNaN(parsed) && parsed >= 15 && parsed <= 60) return parsed;
+      }
+    } catch (e) {}
+    return 32;
+  });
+  const [isDraggingSplitter, setIsDraggingSplitter] = useState<boolean>(false);
+  const mainWorkspaceRef = useRef<HTMLElement | null>(null);
 
   // Key Transpose, Speed Rate & Metronome BPM State
   const [transposeKey, setTransposeKey] = useState<number>(0); // -6 to +6 semitones
@@ -164,14 +156,22 @@ export default function App() {
     onCloseModal: handleCloseAllModals,
   });
 
-  // Optimized Mic Polling: poll live pitch at 50ms, but poll status ONLY if settings modal is open!
+  // Optimized Mic Polling: poll live pitch at 50ms, only when actively recording AND playing (or settings modal is open for mic test)
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isRecording) {
+    if (isRecording && (isPlaying || isSettingsOpen)) {
       timer = setInterval(async () => {
         try {
           const frame = await analyzeLiveStreamPitchNative();
-          if (frame) setLiveMicFrame(frame);
+          if (frame) {
+            setLiveMicFrame((prev) => {
+              // Avoid re-rendering if consecutive frames are both unvoiced/silence
+              if (!frame.is_voiced && !prev?.is_voiced) {
+                return prev;
+              }
+              return frame;
+            });
+          }
 
           if (isSettingsOpen) {
             const status = await fetchMicStatus();
@@ -183,7 +183,7 @@ export default function App() {
       }, 50);
     }
     return () => clearInterval(timer);
-  }, [isRecording, isSettingsOpen]);
+  }, [isRecording, isPlaying, isSettingsOpen]);
 
   // Update Transpose, Playback Rate and Gain dynamically on active audio sources
   useEffect(() => {
@@ -265,7 +265,14 @@ export default function App() {
             try {
               nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
             } catch (pitchErr) {
-              console.warn('[App] Pitch analysis warning:', pitchErr);
+              console.warn('[App] Native pitch analysis warning, falling back to AudioBuffer:', pitchErr);
+            }
+            if (!nativeAnalysis?.pitch_frames || nativeAnalysis.pitch_frames.length === 0) {
+              try {
+                nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
+              } catch (webAudioErr) {
+                console.warn('[App] AudioBuffer pitch analysis warning:', webAudioErr);
+              }
             }
           }
 
@@ -367,6 +374,12 @@ export default function App() {
     onAutoLoadTrack: handleAutoLoadDownloadedTrack,
   });
 
+  const activeDownloadCount = useMemo(() => {
+    return downloadQueue.filter(
+      (q) => q.status === 'downloading' || q.status === 'converting' || q.status === 'pending'
+    ).length;
+  }, [downloadQueue]);
+
   // Stem Splitter Hook — auto-loads vocal & instrumental into existing track slots
   const { splitState, startSplit, cancelSplit, resetSplit } = useStemSplitter({
     onVocalReady: (filePath) => {
@@ -436,7 +449,15 @@ export default function App() {
             try {
               nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
             } catch (e) {
-              console.warn('[App] Pitch analysis warning:', e);
+              console.warn('[App] Pitch analysis warning, falling back to AudioBuffer:', e);
+            }
+            if (!nativeAnalysis?.pitch_frames || nativeAnalysis.pitch_frames.length === 0) {
+              setStatusMsg(`กำลังวิเคราะห์ Pitch เสียงร้องจาก AudioBuffer...`);
+              try {
+                nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
+              } catch (audioBufErr) {
+                console.warn('[App] AudioBuffer pitch analysis warning:', audioBufErr);
+              }
             }
           }
 
@@ -519,43 +540,7 @@ export default function App() {
     [setCleanVideoUrl]
   );
 
-  // Dedicated handler to attach or replace karaoke video
-  const handleAttachVideo = useCallback(
-    async (file: File) => {
-      try {
-        let vUrl: string | null = null;
-        let filePath = (file as any).path;
-        const isTauri = isTauriAvailable();
 
-        if (isTauri && (!filePath || filePath === file.name)) {
-          const buf = await file.arrayBuffer();
-          const saved = await saveUploadedAudioNative(file.name, new Uint8Array(buf));
-          if (saved) filePath = saved;
-        }
-
-        if (isTauri && filePath && filePath !== file.name) {
-          try {
-            const { convertFileSrc } = await import('@tauri-apps/api/core');
-            vUrl = convertFileSrc(filePath);
-          } catch (e) {
-            console.warn('[App] Failed to convertFileSrc for attached video:', e);
-          }
-        }
-
-        if (!vUrl) {
-          vUrl = URL.createObjectURL(file);
-        }
-
-        setCleanVideoUrl(vUrl);
-        setViewMode('video');
-        setStatusMsg(`เชื่อมต่อภาพวิดีโอคาราโอเกะสำเร็จ: '${file.name}'`);
-      } catch (err: any) {
-        console.error('Attach video error:', err);
-        setStatusMsg(`ไม่สามารถโหลดวิดีโอได้: ${err?.message || err?.toString()}`);
-      }
-    },
-    [setCleanVideoUrl]
-  );
 
   // Playback Control
   const maxDuration = Math.max(
@@ -564,15 +549,22 @@ export default function App() {
   );
 
   const stopPlayback = useCallback(() => {
+    isPlayingRef.current = false;
     if (vocalRefSourceRef.current) {
-      try { vocalRefSourceRef.current.stop(); } catch (e) {}
-      vocalRefSourceRef.current.disconnect();
+      try {
+        vocalRefSourceRef.current.onended = null;
+        vocalRefSourceRef.current.stop();
+      } catch (e) {}
+      try { vocalRefSourceRef.current.disconnect(); } catch (e) {}
       vocalRefSourceRef.current = null;
       vocalGainNodeRef.current = null;
     }
     if (instSourceRef.current) {
-      try { instSourceRef.current.stop(); } catch (e) {}
-      instSourceRef.current.disconnect();
+      try {
+        instSourceRef.current.onended = null;
+        instSourceRef.current.stop();
+      } catch (e) {}
+      try { instSourceRef.current.disconnect(); } catch (e) {}
       instSourceRef.current = null;
       instGainNodeRef.current = null;
     }
@@ -581,6 +573,7 @@ export default function App() {
       playbackAnimRef.current = null;
     }
     setIsPlaying(false);
+    setLiveMicFrame(null);
   }, []);
 
   // Mic Controls
@@ -618,8 +611,24 @@ export default function App() {
     }
   }, []);
 
+  const handleToggleMic = useCallback(() => {
+    if (isRecording) {
+      handleStopMic();
+      setStatusMsg('ปิดไมโครโฟนแล้ว');
+    } else {
+      handleStartMic();
+      setStatusMsg('เปิดไมโครโฟนแล้ว');
+    }
+  }, [isRecording, handleStartMic, handleStopMic]);
+
   const startPlayback = useCallback(
     (offsetSec?: number) => {
+      // Clean up previous frame loop immediately to prevent duplicate concurrent loops
+      if (playbackAnimRef.current) {
+        cancelAnimationFrame(playbackAnimRef.current);
+        playbackAnimRef.current = null;
+      }
+
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       }
@@ -631,11 +640,11 @@ export default function App() {
 
       if (vocalRefSourceRef.current) {
         try { vocalRefSourceRef.current.stop(); } catch (e) {}
-        vocalRefSourceRef.current.disconnect();
+        try { vocalRefSourceRef.current.disconnect(); } catch (e) {}
       }
       if (instSourceRef.current) {
         try { instSourceRef.current.stop(); } catch (e) {}
-        instSourceRef.current.disconnect();
+        try { instSourceRef.current.disconnect(); } catch (e) {}
       }
 
       let startAtSec = offsetSec !== undefined ? offsetSec : currentTimeSecRef.current;
@@ -671,11 +680,14 @@ export default function App() {
         vocalGainNodeRef.current = gainNode;
       }
 
+      isPlayingRef.current = true;
       setIsPlaying(true);
       playbackStartTimeRef.current = ctx.currentTime;
       playbackStartOffsetRef.current = startAtSec;
 
+      let lastUiUpdate = 0;
       const updateTimer = () => {
+        if (!isPlayingRef.current) return;
         const elapsed = (ctx.currentTime - playbackStartTimeRef.current) * playbackRate;
         const current = playbackStartOffsetRef.current + elapsed;
 
@@ -686,8 +698,15 @@ export default function App() {
           setIsResultsOpen(true);
         } else {
           currentTimeSecRef.current = current;
-          setCurrentTimeSec(current);
-          playbackAnimRef.current = requestAnimationFrame(updateTimer);
+          const now = performance.now();
+          // Throttle state update to ~25 FPS to save CPU, while ref stays 60 FPS
+          if (now - lastUiUpdate >= 40) {
+            lastUiUpdate = now;
+            setCurrentTimeSec(current);
+          }
+          if (isPlayingRef.current) {
+            playbackAnimRef.current = requestAnimationFrame(updateTimer);
+          }
         }
       };
 
@@ -743,6 +762,43 @@ export default function App() {
     [isPlaying, startPlayback]
   );
 
+  // Draggable Splitter Mouse Drag Listener
+  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingSplitter(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isDraggingSplitter) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = mainWorkspaceRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left;
+      const percent = (relativeX / rect.width) * 100;
+      const clamped = Math.max(15, Math.min(60, percent));
+      setLyricsWidthPercent(Math.round(clamped * 10) / 10);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingSplitter(false);
+      try {
+        setLyricsWidthPercent((current) => {
+          localStorage.setItem('zonic_lyrics_width', current.toString());
+          return current;
+        });
+      } catch (e) {}
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingSplitter]);
+
   // Lyric Lines State
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
 
@@ -755,15 +811,12 @@ export default function App() {
           onOpenDownloader={() => setIsDownloaderOpen(true)}
           onOpenSplitter={() => setIsSplitterOpen(true)}
           onDownloadYoutube={handleDownloadYoutube}
-          isDownloading={isDownloading}
-          activeDownloadCount={downloadQueue.filter((q) => q.status === 'downloading' || q.status === 'converting' || q.status === 'pending').length}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-          hasVideo={Boolean(currentVideoUrl)}
+          isDownloading={isProcessing}
+          activeDownloadCount={activeDownloadCount}
         />
 
         {/* Main Content Area */}
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden gap-3">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden px-4 py-3 gap-3">
           
           {/* Section 1: Top Dual Waveform Bar Container */}
           <DualWaveformBar
@@ -780,11 +833,18 @@ export default function App() {
             onVocalVolumeChange={setVocalVolume}
           />
 
-          {/* Section 2: Middle Workspace Split View (Flexbox Row - 38% Lyrics, 62% Stage) */}
-          <main className="flex-1 flex flex-row items-stretch gap-3.5 min-h-0 overflow-hidden w-full">
-            
-            {/* Left Column (38% Width - Full Height Lyrics Panel Studio) */}
-            <div className="w-[38%] h-full flex flex-col min-h-0 shrink-0 overflow-hidden">
+          {/* Section 2: Middle Workspace Split View with Draggable Resizer */}
+          <main
+            ref={mainWorkspaceRef}
+            className={`flex-1 flex flex-row items-stretch min-h-0 overflow-hidden w-full ${
+              isDraggingSplitter ? 'select-none cursor-col-resize' : ''
+            }`}
+          >
+            {/* Left Column (Resizable Width - Full Height Lyrics Panel Studio) */}
+            <div
+              style={{ width: `${lyricsWidthPercent}%` }}
+              className="h-full flex flex-col min-h-0 shrink-0 overflow-hidden pr-1.5"
+            >
               <LyricsPanel
                 currentTimeSec={currentTimeSec}
                 durationSec={maxDuration}
@@ -797,8 +857,27 @@ export default function App() {
               />
             </div>
 
-            {/* Right Column (62% Width - Karaoke Visualizer Stage / Video Player) */}
-            <div className="flex-1 h-full flex flex-col min-h-0 overflow-hidden">
+            {/* Draggable Vertical Splitter Handle */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              onMouseDown={handleSplitterMouseDown}
+              className={`w-3 -mx-1 h-full flex items-center justify-center cursor-col-resize z-20 group shrink-0 transition-colors ${
+                isDraggingSplitter ? 'bg-cyan-500/20' : 'hover:bg-cyan-500/10'
+              }`}
+              title="ลากเพื่อปรับขนาด Lyrics Studio / Video Stage"
+            >
+              <div
+                className={`w-1 rounded-full transition-all duration-200 ${
+                  isDraggingSplitter
+                    ? 'bg-cyan-400 h-24 shadow-[0_0_12px_rgba(6,182,212,0.9)]'
+                    : 'bg-zinc-700/60 group-hover:bg-cyan-400 group-hover:h-16'
+                }`}
+              />
+            </div>
+
+            {/* Right Column (Flex-1 - Karaoke Visualizer Stage / Video Player) */}
+            <div className="flex-1 h-full flex flex-col min-h-0 overflow-hidden pl-1.5">
               <KaraokeVisualizerStage
                 vocalRefTrack={vocalRefTrack}
                 instrumentalTrack={instrumentalTrack}
@@ -839,6 +918,8 @@ export default function App() {
           onPlaybackRateChange={setPlaybackRate}
           bpm={bpm}
           onBpmChange={setBpm}
+          isRecording={isRecording}
+          onToggleMic={handleToggleMic}
         />
       </div>
 

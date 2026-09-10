@@ -150,8 +150,22 @@ export async function processAudioFileInBrowser(
     peak_amplitude: peakAmp,
   };
 
-  // Perform YIN Pitch Analysis frame-by-frame (30ms hop for smooth performance)
-  const hopMs = 30.0;
+  const analysis = extractPitchFramesFromAudioBuffer(audioBuffer, 30.0);
+
+  return { meta, analysis, audioBuffer };
+}
+
+/**
+ * Direct YIN pitch extraction from an existing AudioBuffer (e.g. decoded MP4/MP3/WAV)
+ */
+export function extractPitchFramesFromAudioBuffer(
+  audioBuffer: AudioBuffer,
+  hopMs = 25.0
+): AnalysisResult {
+  const sampleRate = audioBuffer.sampleRate;
+  const durationSeconds = audioBuffer.duration;
+  const pcmData = audioBuffer.getChannelData(0);
+
   const hopSamples = Math.max(64, Math.floor((sampleRate * hopMs) / 1000));
   const windowSize = 2048;
 
@@ -165,12 +179,13 @@ export async function processAudioFileInBrowser(
     const timestampMs = (i / sampleRate) * 1000;
     const windowSlice = pcmData.subarray(i, i + windowSize);
 
-    // Calculate RMS amplitude for dB
+    // Fast RMS computation with stride 4
     let sumSq = 0;
-    for (let j = 0; j < windowSlice.length; j += 4) {
+    const step = 4;
+    for (let j = 0; j < windowSlice.length; j += step) {
       sumSq += windowSlice[j] * windowSlice[j];
     }
-    const rms = Math.sqrt(sumSq / (windowSlice.length / 4)) || 1e-6;
+    const rms = Math.sqrt(sumSq / (windowSlice.length / step)) || 1e-6;
     const amplitudeDb = Math.max(-100, 20 * Math.log10(rms));
 
     const pitch = detectYinPitch(windowSlice, sampleRate, windowSize);
@@ -196,7 +211,7 @@ export async function processAudioFileInBrowser(
 
   const avgPitchHz = voicedFrames > 0 ? hzSum / voicedFrames : 0;
 
-  const analysis: AnalysisResult = {
+  return {
     total_duration_seconds: durationSeconds,
     sample_rate: sampleRate,
     total_frames: pitchFrames.length,
@@ -206,6 +221,5 @@ export async function processAudioFileInBrowser(
     max_pitch_hz: maxHz,
     avg_pitch_hz: avgPitchHz,
   };
-
-  return { meta, analysis, audioBuffer };
 }
+

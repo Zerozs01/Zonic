@@ -56,7 +56,7 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'download' | 'library'>('download');
   const [urlInput, setUrlInput] = useState<string>('');
-  const [selectedFormat, setSelectedFormat] = useState<AudioFormat>('flac');
+  const [selectedFormat, setSelectedFormat] = useState<AudioFormat>('mp4');
   const [targetTrack, setTargetTrack] = useState<'vocalRef' | 'instrumental' | 'userVocal'>('vocalRef');
   const [libraryFilter, setLibraryFilter] = useState<string>('');
 
@@ -147,7 +147,10 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-6 animate-fade-in">
+    <div
+      style={{ padding: '24px' }}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-fade-in"
+    >
       <div
         className="w-full max-w-3xl bg-[#18181d] border border-zinc-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[88vh]"
         style={{
@@ -155,7 +158,10 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-[#1e1e24]/80">
+        <div
+          style={{ padding: '16px 24px' }}
+          className="flex items-center justify-between border-b border-zinc-800 bg-[#1e1e24]/80"
+        >
           <div className="flex items-center gap-3">
             <div className="p-2.5 rounded-xl bg-gradient-to-br from-cyan-600/30 to-purple-600/30 border border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(6,182,212,0.25)]">
               <Download size={20} />
@@ -181,7 +187,10 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center justify-between px-6 pt-3 pb-0 bg-[#16161a] border-b border-zinc-800/80">
+        <div
+          style={{ padding: '12px 24px 0 24px' }}
+          className="flex items-center justify-between bg-[#16161a] border-b border-zinc-800/80"
+        >
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActiveTab('download')}
@@ -235,19 +244,37 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
         {activeTab === 'download' && (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {/* Form Input Section */}
-            <form onSubmit={handleSubmit} className="p-6 border-b border-zinc-800/80 bg-[#16161a] space-y-4">
+            <form
+              onSubmit={handleSubmit}
+              style={{ padding: '18px 24px' }}
+              className="border-b border-zinc-800/80 bg-[#16161a] space-y-3.5"
+            >
               <div>
                 <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
                   Media Stream URL:
                 </label>
-                <div className="flex items-center bg-[#22222a] border border-zinc-700/80 rounded-xl px-3 py-1.5 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500/50 transition-all shadow-inner">
-                  <input
-                    type="text"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none min-w-0"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 flex items-center bg-[#22222a] border border-zinc-700/80 rounded-xl px-3 py-2 focus-within:border-cyan-500 focus-within:ring-1 focus-within:ring-cyan-500/50 transition-all shadow-inner min-w-0">
+                    <input
+                      type="text"
+                      value={urlInput}
+                      onChange={(e) => setUrlInput(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=..."
+                      className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none min-w-0"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!urlInput.trim()}
+                    className={`px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+                      urlInput.trim()
+                        ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]'
+                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed'
+                    }`}
+                  >
+                    <Download size={15} />
+                    <span>Add to Queue</span>
+                  </button>
                 </div>
               </div>
 
@@ -255,7 +282,7 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
                 {/* Format Selection */}
                 <div>
                   <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
-                    Output Audio Format:
+                    Output Audio / Video Format:
                   </label>
                   <div className="grid grid-cols-4 gap-1.5">
                     {(['flac', 'mp3', 'wav', 'mp4'] as AudioFormat[]).map((fmt) => (
@@ -306,24 +333,13 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
                   </div>
                 </div>
               </div>
-
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  disabled={!urlInput.trim()}
-                  className={`px-5 py-2.5 rounded-xl font-semibold text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer ${
-                    urlInput.trim()
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-[0_0_20px_rgba(6,182,212,0.4)]'
-                      : 'bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed'
-                  }`}
-                >
-                  <Download size={16} /> Add to Download Queue
-                </button>
-              </div>
             </form>
 
             {/* Sequential Queue List */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+            <div
+              style={{ padding: '20px 24px' }}
+              className="flex-1 overflow-y-auto space-y-3"
+            >
               <div className="flex items-center justify-between pb-1">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-2">
                   <span>Download & Processing Queue</span>
@@ -489,7 +505,10 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
         {activeTab === 'library' && (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             {/* Library Search & Toolbar */}
-            <div className="px-6 py-3 border-b border-zinc-800 bg-[#16161a] flex items-center justify-between gap-3">
+            <div
+              style={{ padding: '14px 24px' }}
+              className="border-b border-zinc-800 bg-[#16161a] flex items-center justify-between gap-3"
+            >
               <input
                 type="text"
                 placeholder="ค้นหาเพลงในคลัง..."
@@ -513,7 +532,10 @@ export const UrlDownloaderModal: React.FC<UrlDownloaderModalProps> = ({
             </div>
 
             {/* Library Files List */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-2.5">
+            <div
+              style={{ padding: '20px 24px' }}
+              className="flex-1 overflow-y-auto space-y-2.5"
+            >
               {filteredLibrary.length === 0 ? (
                 <div className="py-14 flex flex-col items-center justify-center text-zinc-500 border border-dashed border-zinc-800 rounded-xl">
                   <HardDrive size={32} className="mb-2 opacity-30" />

@@ -21,6 +21,56 @@ pub struct RecordingStatus {
     pub gain_db: f32,
 }
 
+#[derive(Debug, Clone)]
+pub struct CircularAudioBuffer {
+    buffer: Vec<f32>,
+    write_pos: usize,
+    total_written: usize,
+    capacity: usize,
+}
+
+impl CircularAudioBuffer {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            buffer: vec![0.0; capacity],
+            write_pos: 0,
+            total_written: 0,
+            capacity,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.write_pos = 0;
+        self.total_written = 0;
+        self.buffer.fill(0.0);
+    }
+
+    #[inline(always)]
+    pub fn push_sample(&mut self, sample: f32) {
+        self.buffer[self.write_pos] = sample;
+        self.write_pos = (self.write_pos + 1) % self.capacity;
+        self.total_written = self.total_written.saturating_add(1);
+    }
+
+    pub fn get_latest_samples(&self, max_count: usize) -> Vec<f32> {
+        let available = self.total_written.min(self.capacity);
+        let count = max_count.min(available);
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let start_pos = (self.write_pos + self.capacity - count) % self.capacity;
+        if start_pos + count <= self.capacity {
+            self.buffer[start_pos..start_pos + count].to_vec()
+        } else {
+            let mut res = Vec::with_capacity(count);
+            res.extend_from_slice(&self.buffer[start_pos..]);
+            res.extend_from_slice(&self.buffer[..count - (self.capacity - start_pos)]);
+            res
+        }
+    }
+}
+
 pub struct AudioRecorder {
     stream: Option<Stream>,
     is_recording: Arc<AtomicBool>,
@@ -30,7 +80,7 @@ pub struct AudioRecorder {
     sample_rate: Arc<AtomicU64>,
     buffer_size: Arc<AtomicU64>,
     host_name: Arc<Mutex<String>>,
-    ring_buffer: Arc<Mutex<Vec<f32>>>,
+    ring_buffer: Arc<Mutex<CircularAudioBuffer>>,
     high_pass_filter: Arc<Mutex<HighPassFilter>>,
     gain_stage: Arc<Mutex<GainStage>>,
 }
@@ -51,7 +101,7 @@ impl AudioRecorder {
             sample_rate: Arc::new(AtomicU64::new(48000)),
             buffer_size: Arc::new(AtomicU64::new(256)),
             host_name: Arc::new(Mutex::new("WASAPI".to_string())),
-            ring_buffer: Arc::new(Mutex::new(Vec::with_capacity(48000 * 5))), // 5s buffer
+            ring_buffer: Arc::new(Mutex::new(CircularAudioBuffer::new(48000 * 5))), // 5s circular buffer
             high_pass_filter: Arc::new(Mutex::new(HighPassFilter::new(48000, 80.0))),
             gain_stage: Arc::new(Mutex::new(GainStage::new(6.0))), // +6dB initial sweet spot
         }
@@ -307,12 +357,7 @@ impl AudioRecorder {
     }
 
     pub fn get_buffered_samples(&self, max_count: usize) -> Vec<f32> {
-        let buf = self.ring_buffer.lock();
-        if buf.len() <= max_count {
-            buf.clone()
-        } else {
-            buf[buf.len() - max_count..].to_vec()
-        }
+        self.ring_buffer.lock().get_latest_samples(max_count)
     }
 }
 
@@ -322,7 +367,7 @@ fn process_audio_chunk_f32(
     is_recording: &Arc<AtomicBool>,
     total_samples: &Arc<AtomicU64>,
     peak_holder: &Arc<Mutex<f32>>,
-    ring_buffer: &Arc<Mutex<Vec<f32>>>,
+    ring_buffer: &Arc<Mutex<CircularAudioBuffer>>,
     high_pass_filter: &Arc<Mutex<HighPassFilter>>,
     gain_stage: &Arc<Mutex<GainStage>>,
 ) {
@@ -330,16 +375,21 @@ fn process_audio_chunk_f32(
         return;
     }
 
-    let mut mono_chunk = Vec::with_capacity(data.len() / channels.max(1));
-    let mut max_amp = 0.0f32;
+    let ch = channels.max(1);
+    let num_samples = data.len() / ch;
+    if num_samples == 0 {
+        return;
+    }
 
+    let mut max_amp = 0.0f32;
     let mut hp = high_pass_filter.lock();
     let gs = gain_stage.lock();
+    let mut buf = ring_buffer.lock();
 
-    for chunk in data.chunks(channels.max(1)) {
+    for chunk in data.chunks(ch) {
         // Mix to mono
-        let raw_mono = chunk.iter().sum::<f32>() / channels.max(1) as f32;
-        
+        let raw_mono = chunk.iter().sum::<f32>() / ch as f32;
+
         // 1. Apply 80 Hz Low-Cut (High-Pass) Biquad filter to eliminate desk rumble / plosives
         let filtered = hp.process_sample(raw_mono);
 
@@ -347,8 +397,12 @@ fn process_audio_chunk_f32(
         let processed = gs.process_sample(filtered);
 
         max_amp = max_amp.max(processed.abs());
-        mono_chunk.push(processed);
+        buf.push_sample(processed);
     }
+
+    drop(buf);
+    drop(hp);
+    drop(gs);
 
     let peak_db = if max_amp > 0.00001 {
         20.0 * max_amp.log10()
@@ -357,13 +411,5 @@ fn process_audio_chunk_f32(
     };
 
     *peak_holder.lock() = peak_db;
-    total_samples.fetch_add(mono_chunk.len() as u64, Ordering::SeqCst);
-
-    let mut buf = ring_buffer.lock();
-    buf.extend(mono_chunk);
-    // Keep max 5 seconds buffer at 48kHz (240,000 samples)
-    if buf.len() > 240_000 {
-        let overflow = buf.len() - 240_000;
-        buf.drain(0..overflow);
-    }
+    total_samples.fetch_add(num_samples as u64, Ordering::SeqCst);
 }
