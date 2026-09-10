@@ -19,7 +19,11 @@ export interface LyricLine {
 /**
  * Parses LRC lyrics format `[mm:ss.xx] text` or plain text with auto-spaced timestamps across song duration.
  */
-export function parseLyricsText(rawText: string, durationSec = 180): LyricLine[] {
+export function parseLyricsText(
+  rawText: string,
+  durationSec = 180,
+  startOffsetSec = 0
+): LyricLine[] {
   if (!rawText.trim()) return [];
 
   const lines = rawText.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -66,12 +70,14 @@ export function parseLyricsText(rawText: string, durationSec = 180): LyricLine[]
     return parsedLrc.sort((a, b) => a.startTime - b.startTime);
   }
 
-  // Plain text fallback: distribute lines evenly across song duration
+  // Plain text fallback: distribute lines starting from startOffsetSec across available duration
   const total = lines.length;
-  const interval = durationSec > 0 ? (durationSec * 0.85) / Math.max(1, total) : 4;
+  const offset = Math.max(0, startOffsetSec);
+  const availableDuration = Math.max(10, durationSec - offset);
+  const interval = (availableDuration * 0.9) / Math.max(1, total);
 
   return lines.map((text, idx) => {
-    const startTime = Math.round(idx * interval * 100) / 100;
+    const startTime = Math.round((offset + idx * interval) * 100) / 100;
     const endTime = Math.round((startTime + interval * 0.9) * 100) / 100;
     const wordsArr = text.trim().split(/\s+/).map((w, wIdx, arr) => {
       const wLen = (endTime - startTime) / arr.length;
@@ -100,35 +106,35 @@ export function detectSongBpm(audioBuffer: AudioBuffer): number {
   try {
     const pcm = audioBuffer.getChannelData(0);
     const sampleRate = audioBuffer.sampleRate;
-    const step = Math.floor(sampleRate * 0.01); // 10ms frames
-    const frameCount = Math.floor(pcm.length / step);
+    const step = Math.floor(sampleRate * 0.02); // 20ms frames for high speed
+    const frameCount = Math.min(Math.floor(pcm.length / step), 1500); // Analyze first ~30 seconds
     
-    // Compute frame energies
+    // Compute frame energies with fast decimation
     const energies = new Float32Array(frameCount);
     for (let f = 0; f < frameCount; f++) {
       let sumSq = 0;
       const start = f * step;
       const end = Math.min(pcm.length, start + step);
-      for (let i = start; i < end; i += 4) {
+      for (let i = start; i < end; i += 8) {
         sumSq += pcm[i] * pcm[i];
       }
-      energies[f] = Math.sqrt(sumSq / ((end - start) / 4 || 1));
+      energies[f] = Math.sqrt(sumSq / ((end - start) / 8 || 1));
     }
 
     // Auto-correlation for lags corresponding to 60 BPM to 180 BPM
     const minBpm = 60;
     const maxBpm = 180;
-    const minLag = Math.floor((60 / maxBpm) / 0.01); // ~33 frames
-    const maxLag = Math.floor((60 / minBpm) / 0.01); // ~100 frames
+    const minLag = Math.floor((60 / maxBpm) / 0.02); // ~16 frames
+    const maxLag = Math.floor((60 / minBpm) / 0.02); // ~50 frames
 
     let maxCorr = 0;
-    let bestLag = 60;
+    let bestLag = 30;
 
-    const sampleFrames = Math.min(frameCount - maxLag, 3000); // Check first ~30 seconds
+    const sampleFrames = Math.max(10, frameCount - maxLag);
 
     for (let lag = minLag; lag <= maxLag; lag++) {
       let corr = 0;
-      for (let i = 0; i < sampleFrames; i++) {
+      for (let i = 0; i < sampleFrames; i += 2) {
         corr += energies[i] * energies[i + lag];
       }
       if (corr > maxCorr) {
@@ -137,7 +143,7 @@ export function detectSongBpm(audioBuffer: AudioBuffer): number {
       }
     }
 
-    const bpm = Math.round(60 / (bestLag * 0.01));
+    const bpm = Math.round(60 / (bestLag * 0.02));
     return isNaN(bpm) || bpm < 50 || bpm > 220 ? 120 : bpm;
   } catch (e) {
     console.warn('BPM detection error:', e);

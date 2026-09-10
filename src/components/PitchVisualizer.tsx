@@ -41,7 +41,7 @@ const SCALE_NOTES = [
   { name: 'A2', hz: 110.0 },
 ];
 
-export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
+export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
   vocalRefTrack,
   currentTimeSec,
   durationSec,
@@ -54,8 +54,9 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [zoomLevel, setZoomLevel] = useState<number>(1.2);
-  const scrollOffsetSec = Math.max(0, currentTimeSec - (durationSec / zoomLevel) / 3);
+  const [zoomLevel, setZoomLevel] = useState<number>(1.0);
+  const visibleDuration = Math.max(3.0, Math.min(12.0, 7.0 / zoomLevel));
+  const startTimeSec = Math.max(0, currentTimeSec - visibleDuration * 0.25);
   const isDraggingRef = useRef<boolean>(false);
 
   // Live pitch trail history
@@ -235,10 +236,6 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       return height - 30 - norm * (height - 60);
     };
 
-    const maxDuration = Math.max(10, durationSec);
-    const visibleDuration = maxDuration / zoomLevel;
-    const startTimeSec = Math.max(0, Math.min(scrollOffsetSec, maxDuration - visibleDuration));
-
     const timeToX = (tSec: number) => {
       const norm = (tSec - startTimeSec) / visibleDuration;
       return norm * (width - 70) + 50;
@@ -417,7 +414,8 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     currentTimeSec,
     durationSec,
     zoomLevel,
-    scrollOffsetSec,
+    visibleDuration,
+    startTimeSec,
     isRecording,
     liveMicFrame,
     transposeKey,
@@ -446,10 +444,6 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
     const clickX = e.clientX - rect.left;
 
     const width = rect.width;
-    const maxDuration = Math.max(10, durationSec);
-    const visibleDuration = maxDuration / zoomLevel;
-    const startTimeSec = Math.max(0, Math.min(scrollOffsetSec, maxDuration - visibleDuration));
-
     const normX = Math.max(0, Math.min(1, (clickX - 50) / (width - 70)));
     const targetTimeSec = startTimeSec + normX * visibleDuration;
     onSeek(Math.max(0, Math.min(durationSec, targetTimeSec)));
@@ -494,5 +488,5 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = ({
       )}
     </div>
   );
-};
+});
 

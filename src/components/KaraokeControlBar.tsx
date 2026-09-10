@@ -37,14 +37,27 @@ interface KaraokeControlBarProps {
 }
 
 const SPEED_OPTIONS = [
-  { label: '0.5x', value: 0.5 },
+  { label: '0.50x', value: 0.5 },
+  { label: '0.60x', value: 0.6 },
+  { label: '0.70x', value: 0.7 },
   { label: '0.75x', value: 0.75 },
-  { label: '1.0x (Normal)', value: 1.0 },
+  { label: '0.80x', value: 0.8 },
+  { label: '0.85x', value: 0.85 },
+  { label: '0.90x', value: 0.9 },
+  { label: '0.95x', value: 0.95 },
+  { label: '1.00x (Normal)', value: 1.0 },
+  { label: '1.05x', value: 1.05 },
+  { label: '1.10x', value: 1.1 },
+  { label: '1.15x', value: 1.15 },
+  { label: '1.20x', value: 1.2 },
   { label: '1.25x', value: 1.25 },
-  { label: '1.5x', value: 1.5 },
+  { label: '1.35x', value: 1.35 },
+  { label: '1.50x', value: 1.5 },
+  { label: '1.75x', value: 1.75 },
+  { label: '2.00x', value: 2.0 },
 ];
 
-export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
+export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = React.memo(({
   isPlaying,
   currentTimeSec,
   durationSec,
@@ -63,6 +76,12 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
     const m = Math.floor(sec / 60);
     const s = Math.floor(sec % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleStepRate = (delta: number) => {
+    const nextRate = Math.round((playbackRate + delta) * 100) / 100;
+    const clamped = Math.max(0.5, Math.min(2.0, nextRate));
+    onPlaybackRateChange(clamped);
   };
   return (
     <footer
@@ -149,7 +168,7 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
               ? 'bg-amber-500 hover:bg-amber-400 text-zinc-900'
               : 'bg-white hover:bg-zinc-100 text-zinc-900 hover:scale-105 active:scale-95'
           }`}
-          title={isPlaying ? 'Pause' : 'Play'}
+          title={isPlaying ? 'Pause (Spacebar)' : 'Play (Spacebar)'}
         >
           {isPlaying ? (
             <Pause size={24} className="fill-zinc-900 text-zinc-900" />
@@ -175,21 +194,46 @@ export const KaraokeControlBar: React.FC<KaraokeControlBarProps> = ({
         </div>
       </div>
 
-      {/* 4. Playback Speed Selector (Right): [ ⏱️ 1.0x (Normal) ▾ ] */}
-      <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-lg px-3 py-1.5 gap-2 shadow">
-        <Gauge size={15} className="text-cyan-400" />
-        <select
-          value={playbackRate}
-          onChange={(e) => onPlaybackRateChange(parseFloat(e.target.value))}
-          className="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer"
+      {/* 4. Playback Speed Selector (Right): [-] [ ⏱️ 1.00x ▾ ] [+] */}
+      <div className="flex items-center bg-[#2b2b2b] border border-zinc-700/60 rounded-md overflow-hidden shadow">
+        <button
+          onClick={() => handleStepRate(-0.05)}
+          disabled={playbackRate <= 0.5}
+          className="px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 font-bold transition-colors cursor-pointer text-sm"
+          title="Decrease speed by -0.05x"
         >
-          {SPEED_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          -
+        </button>
+
+        <div className="px-2.5 py-1 flex items-center gap-1.5 border-x border-zinc-700/60 bg-[#222222]">
+          <Gauge size={14} className="text-cyan-400 shrink-0" />
+          <select
+            value={playbackRate}
+            onChange={(e) => onPlaybackRateChange(parseFloat(e.target.value))}
+            className="bg-transparent text-xs font-bold text-cyan-400 focus:outline-none cursor-pointer"
+          >
+            {!SPEED_OPTIONS.some((opt) => Math.abs(opt.value - playbackRate) < 0.001) && (
+              <option value={playbackRate} className="bg-zinc-900 text-zinc-200">
+                {playbackRate.toFixed(2)}x
+              </option>
+            )}
+            {SPEED_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value} className="bg-zinc-900 text-zinc-200">
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          onClick={() => handleStepRate(0.05)}
+          disabled={playbackRate >= 2.0}
+          className="px-2.5 py-1.5 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 font-bold transition-colors cursor-pointer text-sm"
+          title="Increase speed by +0.05x"
+        >
+          +
+        </button>
       </div>
     </footer>
   );
-};
+});

@@ -150,8 +150,8 @@ export async function processAudioFileInBrowser(
     peak_amplitude: peakAmp,
   };
 
-  // Perform YIN Pitch Analysis frame-by-frame
-  const hopMs = 10.0;
+  // Perform YIN Pitch Analysis frame-by-frame (30ms hop for smooth performance)
+  const hopMs = 30.0;
   const hopSamples = Math.max(64, Math.floor((sampleRate * hopMs) / 1000));
   const windowSize = 2048;
 

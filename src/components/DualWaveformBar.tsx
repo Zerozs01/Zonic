@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { Upload, Volume2, VolumeX } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Upload, Volume2, VolumeX, Mic, Music2, Trash2 } from 'lucide-react';
 import { LoadedTrack } from '../types/audio';
 import { setTrackGainNative, setTrackMuteNative } from '../services/tauriBridge';
 
@@ -10,6 +10,7 @@ interface DualWaveformBarProps {
   durationSec: number;
   onSeek: (timeSec: number) => void;
   onTrackLoaded: (trackType: 'vocalRef' | 'instrumental', file: File) => void;
+  onClearTrack?: (trackType: 'vocalRef' | 'instrumental') => void;
   instVolume: number;
   onInstVolumeChange: (vol: number) => void;
   vocalVolume: number;
@@ -23,6 +24,7 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
   durationSec,
   onSeek,
   onTrackLoaded,
+  onClearTrack,
   instVolume,
   onInstVolumeChange,
   vocalVolume,
@@ -35,16 +37,84 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
   const vocalCanvasRef = useRef<HTMLCanvasElement>(null);
   const instCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Volume memories for Mute/Solo restore
+  const lastInstVolRef = useRef<number>(0.8);
+  const lastVocalVolRef = useRef<number>(0.7);
+
+  // Track Solo States
+  const [instSolo, setInstSolo] = useState<boolean>(false);
+  const [vocalSolo, setVocalSolo] = useState<boolean>(false);
+
+  // Volume & Mute handlers
   const handleInstVolume = (vol: number) => {
+    if (vol > 0) lastInstVolRef.current = vol;
     onInstVolumeChange(vol);
     setTrackGainNative('instrumental', vol).catch(() => {});
     setTrackMuteNative('instrumental', vol === 0).catch(() => {});
   };
 
   const handleVocalVolume = (vol: number) => {
+    if (vol > 0) lastVocalVolRef.current = vol;
     onVocalVolumeChange(vol);
     setTrackGainNative('vocalRef', vol).catch(() => {});
     setTrackMuteNative('vocalRef', vol === 0).catch(() => {});
+  };
+
+  // Mute Toggles
+  const isInstMuted = instVolume === 0;
+  const isVocalMuted = vocalVolume === 0;
+
+  const toggleInstMute = () => {
+    if (isInstMuted) {
+      handleInstVolume(lastInstVolRef.current > 0 ? lastInstVolRef.current : 0.8);
+    } else {
+      lastInstVolRef.current = instVolume;
+      handleInstVolume(0);
+    }
+  };
+
+  const toggleVocalMute = () => {
+    if (isVocalMuted) {
+      handleVocalVolume(lastVocalVolRef.current > 0 ? lastVocalVolRef.current : 0.7);
+    } else {
+      lastVocalVolRef.current = vocalVolume;
+      handleVocalVolume(0);
+    }
+  };
+
+  // Solo Toggles
+  const toggleInstSolo = () => {
+    if (instSolo) {
+      // Turn off solo -> Restore vocal volume
+      setInstSolo(false);
+      handleVocalVolume(lastVocalVolRef.current > 0 ? lastVocalVolRef.current : 0.7);
+    } else {
+      // Turn on solo -> Unmute inst, mute vocal
+      setInstSolo(true);
+      setVocalSolo(false);
+      if (isInstMuted) {
+        handleInstVolume(lastInstVolRef.current > 0 ? lastInstVolRef.current : 0.8);
+      }
+      lastVocalVolRef.current = vocalVolume > 0 ? vocalVolume : lastVocalVolRef.current;
+      handleVocalVolume(0);
+    }
+  };
+
+  const toggleVocalSolo = () => {
+    if (vocalSolo) {
+      // Turn off solo -> Restore inst volume
+      setVocalSolo(false);
+      handleInstVolume(lastInstVolRef.current > 0 ? lastInstVolRef.current : 0.8);
+    } else {
+      // Turn on solo -> Unmute vocal, mute inst
+      setVocalSolo(true);
+      setInstSolo(false);
+      if (isVocalMuted) {
+        handleVocalVolume(lastVocalVolRef.current > 0 ? lastVocalVolRef.current : 0.7);
+      }
+      lastInstVolRef.current = instVolume > 0 ? instVolume : lastInstVolRef.current;
+      handleInstVolume(0);
+    }
   };
 
   // Render Music (Instrumental) Waveform
@@ -72,21 +142,32 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       const step = Math.ceil(data.length / width);
       const amp = height / 2;
 
+      // Draw subtle center line
+      ctx.strokeStyle = 'rgba(0, 255, 136, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, amp);
+      ctx.lineTo(width, amp);
+      ctx.stroke();
+
+      // Draw waveform bars
       ctx.fillStyle = '#00ff88'; // Bright Neon Emerald
       for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
         for (let j = 0; j < step; j++) {
           const datum = data[i * step + j];
-          if (datum < min) min = datum;
-          if (datum > max) max = datum;
+          if (datum !== undefined) {
+            if (datum < min) min = datum;
+            if (datum > max) max = datum;
+          }
         }
-        const barHeight = Math.max(2, (max - min) * amp * 0.9);
+        const barHeight = Math.max(2, (max - min) * amp * 0.95);
         ctx.fillRect(i, amp - barHeight / 2, 1.5, barHeight);
       }
     } else {
       // Placeholder Waveform Pattern when empty
-      ctx.fillStyle = 'rgba(0, 255, 136, 0.4)';
+      ctx.fillStyle = 'rgba(0, 255, 136, 0.35)';
       for (let i = 0; i < width; i += 4) {
         const h = Math.sin(i * 0.05) * 12 + 16;
         ctx.fillRect(i, (height - h) / 2, 2, h);
@@ -119,21 +200,32 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
       const step = Math.ceil(data.length / width);
       const amp = height / 2;
 
+      // Draw subtle center line
+      ctx.strokeStyle = 'rgba(183, 110, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, amp);
+      ctx.lineTo(width, amp);
+      ctx.stroke();
+
+      // Draw waveform bars
       ctx.fillStyle = '#b76eff'; // Bright Neon Purple
       for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
         for (let j = 0; j < step; j++) {
           const datum = data[i * step + j];
-          if (datum < min) min = datum;
-          if (datum > max) max = datum;
+          if (datum !== undefined) {
+            if (datum < min) min = datum;
+            if (datum > max) max = datum;
+          }
         }
-        const barHeight = Math.max(2, (max - min) * amp * 0.9);
+        const barHeight = Math.max(2, (max - min) * amp * 0.95);
         ctx.fillRect(i, amp - barHeight / 2, 1.5, barHeight);
       }
     } else {
       // Placeholder Waveform Pattern when empty
-      ctx.fillStyle = 'rgba(183, 110, 255, 0.4)';
+      ctx.fillStyle = 'rgba(183, 110, 255, 0.35)';
       for (let i = 0; i < width; i += 4) {
         const h = Math.cos(i * 0.05) * 12 + 16;
         ctx.fillRect(i, (height - h) / 2, 2, h);
@@ -185,24 +277,71 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
 
       {/* Row 1: Music / Instrumental Track */}
       <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
-        {/* Left Track Control */}
-        <div className="flex items-center gap-2.5 w-44 shrink-0">
-          <span className="text-xs font-semibold text-emerald-400 w-12 shrink-0">Music</span>
+        {/* Left Track Control & Mute/Solo */}
+        <div className="flex items-center gap-2 w-60 shrink-0">
+          <div className="flex items-center gap-1.5 w-20 shrink-0">
+            <Music2 size={13} className="text-emerald-400 shrink-0" />
+            <span
+              className="text-xs font-semibold text-emerald-400 truncate"
+              title={instrumentalTrack?.name || 'Music (Instrumental)'}
+            >
+              {instrumentalTrack ? 'Music' : 'Music'}
+            </span>
+          </div>
+
+          {/* DAW-Style Mute / Solo Buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={toggleInstMute}
+              className={`w-6 h-6 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                isInstMuted
+                  ? 'bg-rose-600 text-white border-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200'
+              }`}
+              title="Mute Music Track (M)"
+            >
+              M
+            </button>
+            <button
+              onClick={toggleInstSolo}
+              className={`w-6 h-6 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                instSolo
+                  ? 'bg-emerald-500 text-zinc-950 border-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.7)]'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200'
+              }`}
+              title="Solo Music Track (S)"
+            >
+              S
+            </button>
+          </div>
+
+          {/* Upload Button */}
           <button
             onClick={() => instInputRef.current?.click()}
-            className="p-1 rounded bg-zinc-800 border border-emerald-500/40 hover:bg-emerald-950/80 text-emerald-400 transition-colors cursor-pointer"
+            className="p-1 rounded bg-zinc-800 border border-emerald-500/40 hover:bg-emerald-950/80 text-emerald-400 transition-colors cursor-pointer shrink-0"
             title="อัปโหลด/เปลี่ยนไฟล์เสียงดนตรี (Instrumental)"
           >
-            <Upload size={14} />
+            <Upload size={13} />
           </button>
 
-          {/* Volume Fader */}
-          <div className="flex items-center gap-1 flex-1">
+          {/* Clear Track Button */}
+          {instrumentalTrack && onClearTrack && (
             <button
-              onClick={() => handleInstVolume(instVolume > 0 ? 0 : 0.8)}
-              className="text-zinc-400 hover:text-emerald-400 cursor-pointer"
+              onClick={() => onClearTrack('instrumental')}
+              className="p-1 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/70 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0"
+              title="เอาแทร็กเสียงดนตรีออก (Clear Track)"
             >
-              {instVolume === 0 ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
+              <Trash2 size={13} />
+            </button>
+          )}
+
+          {/* Volume Fader */}
+          <div className="flex items-center gap-1 flex-1 min-w-0">
+            <button
+              onClick={toggleInstMute}
+              className="text-zinc-400 hover:text-emerald-400 cursor-pointer shrink-0"
+            >
+              {isInstMuted ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
             </button>
             <input
               type="range"
@@ -234,24 +373,71 @@ export const DualWaveformBar: React.FC<DualWaveformBarProps> = React.memo(({
 
       {/* Row 2: Vocal Guide Track */}
       <div className="flex items-center gap-3 h-12 bg-[#121212] rounded px-3 border border-zinc-800/60 overflow-hidden">
-        {/* Left Track Control */}
-        <div className="flex items-center gap-2.5 w-44 shrink-0">
-          <span className="text-xs font-semibold text-purple-400 w-12 shrink-0">Vocal</span>
+        {/* Left Track Control & Mute/Solo */}
+        <div className="flex items-center gap-2 w-60 shrink-0">
+          <div className="flex items-center gap-1.5 w-20 shrink-0">
+            <Mic size={13} className="text-purple-400 shrink-0" />
+            <span
+              className="text-xs font-semibold text-purple-400 truncate"
+              title={vocalRefTrack?.name || 'Vocal Guide'}
+            >
+              {vocalRefTrack ? 'Vocal' : 'Vocal'}
+            </span>
+          </div>
+
+          {/* DAW-Style Mute / Solo Buttons */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={toggleVocalMute}
+              className={`w-6 h-6 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                isVocalMuted
+                  ? 'bg-rose-600 text-white border-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.6)]'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200'
+              }`}
+              title="Mute Vocal Guide Track (M)"
+            >
+              M
+            </button>
+            <button
+              onClick={toggleVocalSolo}
+              className={`w-6 h-6 rounded text-[10px] font-bold transition-all cursor-pointer border ${
+                vocalSolo
+                  ? 'bg-purple-500 text-zinc-950 border-purple-400 shadow-[0_0_8px_rgba(183,110,255,0.7)]'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-200'
+              }`}
+              title="Solo Vocal Guide Track (S)"
+            >
+              S
+            </button>
+          </div>
+
+          {/* Upload Button */}
           <button
             onClick={() => vocalInputRef.current?.click()}
-            className="p-1 rounded bg-zinc-800 border border-purple-500/40 hover:bg-purple-950/80 text-purple-400 transition-colors cursor-pointer"
+            className="p-1 rounded bg-zinc-800 border border-purple-500/40 hover:bg-purple-950/80 text-purple-400 transition-colors cursor-pointer shrink-0"
             title="อัปโหลด/เปลี่ยนไฟล์เสียงร้อง (Vocal Guide)"
           >
-            <Upload size={14} />
+            <Upload size={13} />
           </button>
 
-          {/* Volume Fader */}
-          <div className="flex items-center gap-1 flex-1">
+          {/* Clear Track Button */}
+          {vocalRefTrack && onClearTrack && (
             <button
-              onClick={() => handleVocalVolume(vocalVolume > 0 ? 0 : 0.7)}
-              className="text-zinc-400 hover:text-purple-400 cursor-pointer"
+              onClick={() => onClearTrack('vocalRef')}
+              className="p-1 rounded bg-zinc-800/90 border border-zinc-700 hover:border-rose-500/70 hover:bg-rose-950/80 text-zinc-400 hover:text-rose-300 transition-colors cursor-pointer shrink-0"
+              title="เอาแทร็กเสียงร้องออก (Clear Track)"
             >
-              {vocalVolume === 0 ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
+              <Trash2 size={13} />
+            </button>
+          )}
+
+          {/* Volume Fader */}
+          <div className="flex items-center gap-1 flex-1 min-w-0">
+            <button
+              onClick={toggleVocalMute}
+              className="text-zinc-400 hover:text-purple-400 cursor-pointer shrink-0"
+            >
+              {isVocalMuted ? <VolumeX size={12} className="text-red-400" /> : <Volume2 size={12} />}
             </button>
             <input
               type="range"

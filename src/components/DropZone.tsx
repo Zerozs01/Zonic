@@ -30,7 +30,11 @@ export const DropZone: React.FC<DropZoneProps> = React.memo(({
     e.stopPropagation();
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|ogg|flac|m4a)$/i)) {
+      if (
+        file.type.startsWith('audio/') ||
+        file.type.startsWith('video/') ||
+        file.name.match(/\.(wav|mp3|ogg|flac|m4a|mp4|webm|mkv|mov)$/i)
+      ) {
         onTrackLoaded(trackType, file);
       }
     }
@@ -54,7 +58,7 @@ export const DropZone: React.FC<DropZoneProps> = React.memo(({
           type="file"
           ref={vocalRefInputRef}
           onChange={(e) => handleFileChange(e, 'vocalRef')}
-          accept="audio/*,.wav,.mp3,.ogg,.flac"
+          accept="audio/*,video/*,.wav,.mp3,.ogg,.flac,.mp4,.webm,.mkv,.mov"
           style={{ display: 'none' }}
         />
 
@@ -118,7 +122,7 @@ export const DropZone: React.FC<DropZoneProps> = React.memo(({
           type="file"
           ref={instInputRef}
           onChange={(e) => handleFileChange(e, 'instrumental')}
-          accept="audio/*,.wav,.mp3,.ogg,.flac"
+          accept="audio/*,video/*,.wav,.mp3,.ogg,.flac,.mp4,.webm,.mkv,.mov"
           style={{ display: 'none' }}
         />
 

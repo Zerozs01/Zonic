@@ -1,5 +1,6 @@
 pub mod pitch;
 pub mod analyzer;
+pub mod filter;
 
 use analyzer::{analyze_pcm_buffer, AnalysisResult};
 use pitch::{YinConfig, YinDetector, PitchFrame};

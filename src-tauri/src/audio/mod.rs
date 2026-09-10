@@ -46,6 +46,41 @@ pub fn load_audio_file(file_path: String) -> Result<AudioFileMeta, String> {
 }
 
 #[tauri::command]
+pub fn save_uploaded_audio(
+    app: tauri::AppHandle,
+    file_name: String,
+    file_bytes: Vec<u8>,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .or_else(|_| app.path().app_data_dir())
+        .unwrap_or_else(|_| std::env::temp_dir());
+
+    let import_dir = cache_dir.join("imported");
+    std::fs::create_dir_all(&import_dir)
+        .map_err(|e| format!("Failed to create import directory: {}", e))?;
+
+    let file_path = import_dir.join(&file_name);
+    std::fs::write(&file_path, &file_bytes)
+        .map_err(|e| format!("Failed to write audio file: {}", e))?;
+
+    let abs_path = std::fs::canonicalize(&file_path)
+        .unwrap_or(file_path);
+
+    println!("[Audio] Saved and registered uploaded file: {}", abs_path.display());
+    Ok(abs_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn read_audio_file_bytes(file_path: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = std::fs::read(&file_path)
+        .map_err(|e| format!("Failed to read audio file '{}': {}", file_path, e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
 pub fn set_track_gain(
     state: tauri::State<'_, AudioState>,
     track_type: String,
@@ -154,4 +189,15 @@ pub fn get_recorded_buffer(
 ) -> Result<Vec<f32>, String> {
     let recorder = state.recorder.lock();
     Ok(recorder.get_buffered_samples(max_samples.unwrap_or(2048)))
+}
+
+#[tauri::command]
+pub fn set_mic_processing(
+    state: tauri::State<'_, AudioState>,
+    high_pass: bool,
+    gain_db: f32,
+) -> Result<RecordingStatus, String> {
+    let recorder = state.recorder.lock();
+    recorder.set_processing(high_pass, gain_db);
+    Ok(recorder.status())
 }

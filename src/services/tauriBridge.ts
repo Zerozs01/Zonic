@@ -118,3 +118,30 @@ export async function separateAudioStemsNative(filePath: string): Promise<string
 export async function forceAlignLyricsNative(vocalPath: string, rawText: string) {
   return await safeInvoke<any[]>('align_lyrics_forced', { vocalPath, rawText });
 }
+
+export async function saveUploadedAudioNative(fileName: string, fileBytes: Uint8Array): Promise<string | null> {
+  if (!isTauriAvailable()) return null;
+  return await safeInvoke<string>('save_uploaded_audio', {
+    fileName,
+    fileBytes: Array.from(fileBytes),
+  });
+}
+
+export async function readAudioFileBytesNative(filePath: string): Promise<ArrayBuffer | null> {
+  if (!isTauriAvailable()) return null;
+  try {
+    const raw = await invoke<any>('read_audio_file_bytes', { filePath });
+    if (raw instanceof ArrayBuffer) return raw;
+    if (raw instanceof Uint8Array) return raw.buffer.slice(0) as ArrayBuffer;
+    if (Array.isArray(raw)) return new Uint8Array(raw).buffer.slice(0) as ArrayBuffer;
+    if (raw?.buffer) return (raw.buffer as ArrayBuffer).slice(0);
+    return null;
+  } catch (err) {
+    console.error('Failed to read audio file bytes:', err);
+    return null;
+  }
+}
+
+export async function setMicProcessingNative(highPass: boolean, gainDb: number): Promise<RecordingStatus | null> {
+  return await safeInvoke<RecordingStatus>('set_mic_processing', { highPass, gainDb });
+}

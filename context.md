@@ -1,19 +1,73 @@
-# Development Context for `antigravity`
+# Architecture Context & Index (L1)
 
-## System Directive
-คุณคือ `antigravity` หน้าที่ของคุณคือการดำเนินงานสร้างแอป VocalAlign ต่อจากโครงสร้างนี้ 
+## 1. System High-Level
+- Summary: Desktop Application สำหรับซ้อมร้องเพลงและคาราโอเกะ รองรับ Audio DSP, Pitch Detection, Video Sync, และ AI Stem Separation
+- Core Stack: React 18, TypeScript, TailwindCSS 4 (Vite) / Rust 2021 (Tauri 2) / Web Audio API / LocalStorage & App FS
+- Key Entry Points:
+  - Client / UI: `src/main.tsx` (DOM Bootstrap), `src/App.tsx` (State Orchestrator)
+  - Server / Main Process: `src-tauri/src/main.rs` (OS Entry), `src-tauri/src/lib.rs` (Tauri IPC Handlers)
+  - Models / Schemas: `src/types/` (TypeScript Interfaces), `src-tauri/src/*/mod.rs` (Rust Core Structs)
 
-## Architectural Strict Rules
-- **ห้ามใช้ Electron**: โครงสร้างทั้งหมดต้องรันบน `Tauri` เพื่อลดภาระ Memory
-- **Rust for Heavy Lifting**: ลอจิกการวิเคราะห์เสียง (FFT, Pitch Detection, YIN Algorithm) และการเข้าถึงระบบไฟล์ ต้องเขียนด้วย Rust (`src-tauri`)
-- **React for Visuals**: การเรนเดอร์กราฟคลื่นเสียงเปรียบเทียบ (Vocal Ref vs Mic) ให้ใช้ React + TypeScript วาดลงบน HTML5 Canvas หรือ WebGL (`src`)
+## 2. Architecture & Data Flow
+User -> React UI -> Hook/Service -> Tauri IPC -> Rust Audio Core / DSP / Sidecar CLI -> Tauri Event Bus -> Web Audio / Canvas
+- Global State: `src/App.tsx` (Central React State & Audio Refs, LocalStorage สำหรับคิวเพลง)
+- Shared Modules / Services: `src/services/tauriBridge.ts`, `src/utils/audioAnalysis.ts`, `src/utils/webAudioPitch.ts`
 
-## Actionable Milestones (Phase 1-3)
-1. **[Setup]**: Initialize Tauri Workspace (React + TS + Vite + Rust).
-2. **[Hardware I/O]**: เขียน Rust เพื่อเข้าถึง Microphone (Audio Input) และอ่านไฟล์ `.wav/.mp3` โดยต้องจัดการ Latency ในระดับฮาร์ดแวร์ให้ต่ำที่สุด
-3. **[DSP Engine]**: Implement อัลกอริทึมสกัดค่า Pitch ออกมาเป็น Array ของ Hz + Time (Timestamp)
-4. **[UI Bridge]**: สร้าง Tauri IPC (Inter-Process Communication) เพื่อส่งข้อมูล Hz Array จาก Rust ไปให้ React วาด UI กราฟเปรียบเทียบแบบเฟรมต่อเฟรม
+## 3. Directory Map (Critical Only)
+`src/components/` -> UI Components หลักสำหรับเวทีคาราโอเกะ มิกเซอร์เสียง การซิงค์เนื้อเพลง และหน้าต่างควบคุม
+`src/hooks/` -> Custom React Hooks สำหรับจัดการ Downloader Queue, Demucs Splitter, Lyrics Sync, Hotkeys และ Scoring
+`src/services/` -> โมดูลเรียก Tauri IPC Commands และดักรับ Event Streams จาก Rust Backend
+`src/types/` -> Type Definitions และ Data Contracts ฝั่ง Frontend ทั้งหมด
+`src/utils/` -> ฟังก์ชันช่วยคำนวณ Audio DSP fallback (YIN), ถอดรหัส LRC/BPM, และแปลง Hz เป็นโน้ตดนตรี
+`src-tauri/src/audio/` -> ดึงสัญญาณไมโครโฟนฮาร์ดแวร์ผ่าน cpal, บริหาร Ring Buffer, และ I/O ไฟล์เสียง
+`src-tauri/src/downloader/` -> ควบคุม Process yt-dlp สำหรับดาวน์โหลดเสียง/วิดีโอ และสแกนคลังเพลง Local
+`src-tauri/src/dsp/` -> Rust Native YIN Pitch Algorithm, Audio Filtering, และ Real-time Live Stream Analysis
+`src-tauri/src/lyrics/` -> ระบบ Forced Alignment ซิงค์คำร้องเข้ากับไทม์ไลน์เสียง
+`src-tauri/src/splitter/` -> ควบคุม Demucs AI Child Process สำหรับแยกเสียงร้องและเสียงดนตรี
 
-## Target Metrics for Success
-- แอพต้องไม่ค้างหรือกระตุกขณะวิเคราะห์ไฟล์เสียงยาว 5 นาที
-- กราฟเทียบเสียงต้องตรงกันระดับเสี้ยววินาที (Millisecond Precision)
+## 4. Feature-to-File Routing
+- Master Audio Playback & Transport
+  - Primary: `src/App.tsx`
+  - Secondary: `src/components/KaraokeControlBar.tsx`, `src/components/DualWaveformBar.tsx`
+  - Scope: ควบคุมการเล่นแทร็กเสียงคู่ ปรับคีย์ Transpose และ Speed
+- Canvas Pitch Graph & Visualizer
+  - Primary: `src/components/PitchVisualizer.tsx`
+  - Secondary: `src/components/KaraokeVisualizerStage.tsx`, `src/utils/webAudioPitch.ts`
+  - Scope: เรนเดอร์ Pitch Note Blocks และ Laser Beam บน Canvas 60FPS
+- Live Mic Pitch Scoring
+  - Primary: `src/hooks/useLivePitchScoring.ts`
+  - Secondary: `src/components/KaraokeHUD.tsx`, `src/components/PerformanceModal.tsx`, `src-tauri/src/dsp/analyzer.rs`
+  - Scope: สกัดความถี่ไมค์สด เทียบเสียง และคำนวณเกรดคะแนน
+- Microphone Hardware & Capture
+  - Primary: `src-tauri/src/audio/recorder.rs`
+  - Secondary: `src/components/MicSettingsModal.tsx`, `src/services/tauriBridge.ts`, `src-tauri/src/audio/device.rs`
+  - Scope: จัดการฮาร์ดแวร์ไมค์ cpal และบันทึก Ring Buffer
+- Media Downloader & Local Library
+  - Primary: `src/hooks/useAudioDownloaderQueue.ts`
+  - Secondary: `src/components/UrlDownloaderModal.tsx`, `src-tauri/src/downloader/mod.rs`, `src/services/downloaderService.ts`
+  - Scope: คิวดาวน์โหลด yt-dlp และจัดการไฟล์ในคลังเพลง
+- AI Stem Separation (Demucs)
+  - Primary: `src/hooks/useStemSplitter.ts`
+  - Secondary: `src/components/StemSplitterPanel.tsx`, `src-tauri/src/splitter/mod.rs`, `src/services/splitterService.ts`
+  - Scope: ควบคุมการแยกแทร็กเสียงร้องและดนตรีด้วย Demucs
+- Lyrics Synchronization & Editing
+  - Primary: `src/hooks/useLyricsSync.ts`
+  - Secondary: `src/components/LyricsPanel.tsx`, `src-tauri/src/lyrics/mod.rs`, `src/services/lyricsService.ts`
+  - Scope: แสดงผล แก้ไข LRC และทำ AI Forced Alignment
+- Video Player Synchronization
+  - Primary: `src/components/KaraokeVisualizerStage.tsx`
+  - Secondary: `src/App.tsx`, `src/components/Header.tsx`
+  - Scope: ซิงค์วิดีโอ MP4 ให้ตรงกับ Web Audio Timeline
+
+## 5. High-Risk & Coupling Zones
+- Shared State / Types: `src/types/audio.ts` -> กระทบ: `src/App.tsx`, `src/services/tauriBridge.ts` และโครงสร้าง Audio Engine ทั้งระบบ
+- API Contracts / IPC Channels: `src-tauri/src/lib.rs` -> กระทบ: `src/services/tauriBridge.ts` และ Services ทั้งหมด หาก signature หรือ event payload เปลี่ยนจะเกิด silent runtime failure
+- Real-time Audio Ring Buffer: `src-tauri/src/audio/recorder.rs` -> กระทบ: Native DSP Analyzer เสี่ยงเจอปัญหา Audio Glitch หรือ Mutex Deadlock
+- Database Schema / Migrations: `localStorage ('zonic_download_queue_v1')` & App FS -> ข้อควรระวัง: โครงสร้างข้อมูลคิวดาวน์โหลดและ Path สื่อ หากปรับ Format ต้องมี Fallback ป้องกันค้าง
+
+## 6. Agent Navigation Rules
+- เริ่มงานใหม่ด้วยการเทียบหา Feature ใน Routing Map เสมอ
+- อ่านเฉพาะ Primary File ก่อน ห้ามอ่าน Secondary หรือ scan ทั้งโฟลเดอร์เว้นแต่ Primary จะมีข้อมูลไม่พอ
+- Source Consistency:
+  - หากพบ path ใน context.md ไม่ตรงกับ Codebase ให้ยึด Codebase เป็นหลัก และอัปเดต context.md ทันที
+  - ห้ามแก้ไข โยกย้าย หรือสร้างไฟล์โค้ดใหม่ขึ้นมาเพียงเพื่อให้ตรงกับ context.md เด็ดขาด

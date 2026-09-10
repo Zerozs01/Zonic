@@ -1,26 +1,43 @@
 import React, { useState } from 'react';
-import { Menu, Download, Settings, Loader2 } from 'lucide-react';
+import { Menu, Download, Settings, Loader2, ListMusic, Scissors, Activity, Video } from 'lucide-react';
+import { AudioFormat } from '../types/downloader';
 
 interface HeaderProps {
   onOpenSettings: () => void;
-  onDownloadYoutube?: (url: string, format: string) => void;
+  onOpenDownloader?: () => void;
+  onOpenSplitter?: () => void;
+  onDownloadYoutube?: (url: string, format: AudioFormat) => void;
   isDownloading?: boolean;
+  activeDownloadCount?: number;
+  viewMode?: 'stage' | 'video';
+  onViewModeChange?: (mode: 'stage' | 'video') => void;
+  hasVideo?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = React.memo(({
   onOpenSettings,
+  onOpenDownloader,
+  onOpenSplitter,
   onDownloadYoutube,
   isDownloading = false,
+  activeDownloadCount = 0,
+  viewMode = 'stage',
+  onViewModeChange,
+  hasVideo = false,
 }) => {
   const [youtubeUrl, setYoutubeUrl] = useState<string>('');
-  const [format, setFormat] = useState<'FLAC' | 'MP3' | 'WAV'>('FLAC');
+  const [format, setFormat] = useState<AudioFormat>('flac');
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
 
   const handleDownload = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!youtubeUrl.trim()) return;
+    if (!youtubeUrl.trim()) {
+      if (onOpenDownloader) onOpenDownloader();
+      return;
+    }
     if (onDownloadYoutube) {
       onDownloadYoutube(youtubeUrl.trim(), format);
+      setYoutubeUrl('');
     }
   };
 
@@ -35,7 +52,7 @@ export const Header: React.FC<HeaderProps> = React.memo(({
       }}
       className="w-full flex items-center justify-between gap-4 shrink-0"
     >
-      {/* Left: App Logo & Side Drawer Toggle Icon */}
+      {/* Left: App Menu & View Mode Toggle (Score vs Video) in Red-Box Spot */}
       <div className="flex items-center gap-3 shrink-0">
         <button
           onClick={() => setIsMenuOpen(!isMenuOpen)}
@@ -44,6 +61,42 @@ export const Header: React.FC<HeaderProps> = React.memo(({
         >
           <Menu size={20} />
         </button>
+
+        {/* View Mode Toggle: [ 📊 หน้าจอคะแนน ] [ 🎬 ภาพวิดีโอ ] */}
+        {onViewModeChange && (
+          <div className="flex items-center bg-[#22222a] border border-zinc-700/80 rounded-xl p-1 shadow-inner gap-1">
+            <button
+              type="button"
+              onClick={() => onViewModeChange('stage')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'stage'
+                  ? 'bg-purple-600/90 text-white shadow-[0_0_12px_rgba(168,85,247,0.4)]'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+              }`}
+              title="สลับเป็นหน้าจอคะแนนและการเทียบเสียง (Score & Pitch Roll)"
+            >
+              <Activity size={14} className={viewMode === 'stage' ? 'text-white' : 'text-purple-400'} />
+              <span className="hidden md:inline">หน้าจอคะแนน</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onViewModeChange('video')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer relative ${
+                viewMode === 'video'
+                  ? 'bg-cyan-600/90 text-white shadow-[0_0_12px_rgba(6,182,212,0.4)]'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+              }`}
+              title="สลับเป็นภาพวิดีโอคาราโอเกะ (Karaoke Video Player)"
+            >
+              <Video size={14} className={viewMode === 'video' ? 'text-white' : 'text-cyan-400'} />
+              <span className="hidden md:inline">ภาพวิดีโอ</span>
+              {hasVideo && (
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse ml-0.5" title="มีวิดีโอพร้อมเล่น" />
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Center: Wide YouTube URL Input Box with Format Selector Dropdown & Download Button */}
@@ -62,35 +115,59 @@ export const Header: React.FC<HeaderProps> = React.memo(({
         {/* Format Selector Dropdown */}
         <select
           value={format}
-          onChange={(e) => setFormat(e.target.value as 'FLAC' | 'MP3' | 'WAV')}
-          className="bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-300 rounded px-2 py-1 hover:text-white focus:outline-none focus:border-cyan-500 cursor-pointer mr-1.5"
+          onChange={(e) => setFormat(e.target.value.toLowerCase() as AudioFormat)}
+          className="bg-zinc-800 border border-zinc-700 text-xs font-semibold text-zinc-300 rounded px-2 py-1 hover:text-white focus:outline-none focus:border-cyan-500 cursor-pointer mr-1.5 uppercase"
         >
-          <option value="FLAC">FLAC</option>
-          <option value="MP3">MP3</option>
-          <option value="WAV">WAV</option>
+          <option value="flac">FLAC</option>
+          <option value="mp3">MP3</option>
+          <option value="wav">WAV</option>
+          <option value="mp4">MP4 (Video)</option>
         </select>
 
         {/* Download Action Button */}
         <button
           type="submit"
-          disabled={!youtubeUrl.trim() || isDownloading}
-          className={`p-1.5 rounded transition-all flex items-center justify-center ${
-            youtubeUrl.trim() && !isDownloading
-              ? 'bg-zinc-700 hover:bg-zinc-600 text-white cursor-pointer'
-              : 'text-zinc-500 cursor-not-allowed'
-          }`}
-          title="Download YouTube Audio"
+          className="p-1.5 rounded transition-all flex items-center justify-center bg-cyan-700/80 hover:bg-cyan-600 text-white cursor-pointer mr-1 shadow-sm"
+          title={youtubeUrl.trim() ? "ดาวน์โหลดเข้าคิว" : "เปิดตัวจัดการดาวน์โหลด"}
         >
           {isDownloading ? (
-            <Loader2 size={16} className="animate-spin text-cyan-400" />
+            <Loader2 size={16} className="animate-spin text-cyan-200" />
           ) : (
-            <Download size={18} className="text-zinc-300" />
+            <Download size={18} className="text-white" />
           )}
         </button>
+
+        {/* Queue Manager Button */}
+        {onOpenDownloader && (
+          <button
+            type="button"
+            onClick={onOpenDownloader}
+            className="p-1.5 rounded text-zinc-400 hover:text-cyan-300 hover:bg-zinc-700/60 transition-colors relative cursor-pointer"
+            title="เปิดคิวดาวน์โหลด (Download Queue)"
+          >
+            <ListMusic size={18} />
+            {activeDownloadCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-cyan-500 text-[10px] font-bold text-black flex items-center justify-center animate-pulse">
+                {activeDownloadCount}
+              </span>
+            )}
+          </button>
+        )}
       </form>
 
-      {/* Right: Settings Gear Icon Button */}
+      {/* Right: Stem Splitter & Settings Buttons */}
       <div className="flex items-center gap-2 shrink-0">
+        {onOpenSplitter && (
+          <button
+            onClick={onOpenSplitter}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 border border-purple-500/40 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="แยกเสียงร้องและเสียงดนตรี (AI Stem Splitter)"
+          >
+            <Scissors size={14} className="text-purple-400" />
+            <span className="hidden sm:inline">Stem Splitter</span>
+          </button>
+        )}
+
         <button
           onClick={onOpenSettings}
           className="p-2 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-800/80 transition-colors cursor-pointer"

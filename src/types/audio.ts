@@ -4,6 +4,10 @@ export interface AudioDevice {
   is_default: boolean;
   sample_rate: number;
   channels: number;
+  preferred_buffer_size?: number;
+  estimated_latency_ms?: number;
+  host_name?: string;
+  supported_formats?: string[];
 }
 
 export interface RecordingStatus {
@@ -11,8 +15,12 @@ export interface RecordingStatus {
   device_name: string;
   sample_rate: number;
   buffer_size: number;
+  latency_ms?: number;
+  host_name?: string;
   current_peak_db: number;
   total_samples_captured: number;
+  high_pass_enabled?: boolean;
+  gain_db?: number;
 }
 
 export interface AudioFileMeta {
@@ -54,6 +62,7 @@ export interface LoadedTrack {
   analysis: AnalysisResult | null;
   audioBuffer: AudioBuffer | null;
   color: string;
+  videoUrl?: string | null;
 }
 
 export interface LiveKaraokeState {
