@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Scissors,
   Loader2,
@@ -10,7 +10,12 @@ import {
   Zap,
   Star,
   X,
+  Play,
+  Pause,
+  FolderOpen,
+  Check,
 } from 'lucide-react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { StemModel, StemSplitterState } from '../types/splitter';
 import { STEM_MODELS } from '../types/splitter';
 
@@ -27,6 +32,10 @@ interface StemSplitterPanelProps {
   onStartSplit: (inputPath: string, model: StemModel) => void;
   onCancelSplit: () => void;
   onReset: () => void;
+  /** Apply tracks and close modal */
+  onApplyAndClose?: () => void;
+  /** Open persistent Downloader & Library modal */
+  onOpenLibrary?: () => void;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -40,9 +49,57 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
   onStartSplit,
   onCancelSplit,
   onReset,
+  onApplyAndClose,
+  onOpenLibrary,
 }) => {
-  const [selectedModel, setSelectedModel] = useState<StemModel>('mdx_extra_q');
+  const [selectedModel, setSelectedModel] = useState<StemModel>('htdemucs');
   const [showModelPicker, setShowModelPicker] = useState(false);
+  const [playingStem, setPlayingStem] = useState<'vocal' | 'inst' | null>(null);
+  const audioPreviewRef = useRef<HTMLAudioElement | null>(null);
+
+  // Stop audio preview on unmount or reset
+  useEffect(() => {
+    return () => {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+        audioPreviewRef.current = null;
+      }
+    };
+  }, []);
+
+  const togglePreview = (type: 'vocal' | 'inst', filePath: string) => {
+    if (playingStem === type) {
+      if (audioPreviewRef.current) {
+        audioPreviewRef.current.pause();
+        audioPreviewRef.current = null;
+      }
+      setPlayingStem(null);
+      return;
+    }
+
+    if (audioPreviewRef.current) {
+      audioPreviewRef.current.pause();
+      audioPreviewRef.current = null;
+    }
+
+    try {
+      const src = convertFileSrc(filePath);
+      const audio = new Audio(src);
+      audioPreviewRef.current = audio;
+      setPlayingStem(type);
+      audio.play().catch((err) => {
+        console.warn('Audio preview play error:', err);
+        setPlayingStem(null);
+      });
+      audio.onended = () => {
+        setPlayingStem(null);
+        audioPreviewRef.current = null;
+      };
+    } catch (err) {
+      console.warn('Audio preview failed:', err);
+      setPlayingStem(null);
+    }
+  };
 
   const { status, percent, stepLabel, vocalPath, instrumentalPath, error } = splitterState;
   const isActive = status === 'loading_model' || status === 'separating' || status === 'writing';
@@ -218,7 +275,25 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
       {/* ── Complete: Stem Tracks preview ─────────────────────── */}
       {isDone && vocalPath && instrumentalPath && (
         <div className="splitter-result-body">
+          <div className="stem-success-banner">
+            <CheckCircle2 size={16} className="success-banner-icon" />
+            <div className="success-banner-text">
+              <span className="success-banner-title">แยกเสียงร้องและดนตรีสำเร็จ!</span>
+              <span className="success-banner-sub">
+                บันทึกไฟล์ลงใน <strong>คลังดาวน์โหลด (Downloads Library)</strong> เรียบร้อยแล้ว
+              </span>
+            </div>
+          </div>
+
           <div className="stem-result-row vocal-row">
+            <button
+              type="button"
+              className={`stem-play-btn ${playingStem === 'vocal' ? 'playing' : ''}`}
+              onClick={() => togglePreview('vocal', vocalPath)}
+              title={playingStem === 'vocal' ? 'หยุดเล่น' : 'ลองฟังเสียงร้อง'}
+            >
+              {playingStem === 'vocal' ? <Pause size={13} /> : <Play size={13} className="play-icon-offset" />}
+            </button>
             <Mic size={16} className="stem-icon vocal-icon" />
             <div className="stem-result-info">
               <span className="stem-result-label">Vocals</span>
@@ -226,10 +301,18 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
                 {vocalPath.split(/[\\/]/).pop()}
               </span>
             </div>
-            <span className="stem-ready-badge">Loaded ✓</span>
+            <span className="stem-ready-badge">พร้อมใช้งาน ✓</span>
           </div>
 
           <div className="stem-result-row inst-row">
+            <button
+              type="button"
+              className={`stem-play-btn inst-play-btn ${playingStem === 'inst' ? 'playing' : ''}`}
+              onClick={() => togglePreview('inst', instrumentalPath)}
+              title={playingStem === 'inst' ? 'หยุดเล่น' : 'ลองฟังเสียงดนตรี'}
+            >
+              {playingStem === 'inst' ? <Pause size={13} /> : <Play size={13} className="play-icon-offset" />}
+            </button>
             <Music2 size={16} className="stem-icon inst-icon" />
             <div className="stem-result-info">
               <span className="stem-result-label">Instrumental</span>
@@ -237,16 +320,63 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
                 {instrumentalPath.split(/[\\/]/).pop()}
               </span>
             </div>
-            <span className="stem-ready-badge">Loaded ✓</span>
+            <span className="stem-ready-badge">พร้อมใช้งาน ✓</span>
           </div>
 
-          <button
-            id="stem-split-again-btn"
-            className="split-again-btn"
-            onClick={onReset}
-          >
-            Split Again
-          </button>
+          <div className="stem-actions-group">
+            {onApplyAndClose && (
+              <button
+                id="stem-apply-close-btn"
+                className="stem-apply-btn"
+                onClick={() => {
+                  if (audioPreviewRef.current) {
+                    audioPreviewRef.current.pause();
+                    audioPreviewRef.current = null;
+                  }
+                  setPlayingStem(null);
+                  onApplyAndClose();
+                }}
+              >
+                <Check size={15} />
+                ใช้งานแทร็ก & ร้องคาราโอเกะ
+              </button>
+            )}
+
+            <div className="stem-secondary-actions">
+              {onOpenLibrary && (
+                <button
+                  id="stem-open-library-btn"
+                  className="stem-library-btn"
+                  onClick={() => {
+                    if (audioPreviewRef.current) {
+                      audioPreviewRef.current.pause();
+                      audioPreviewRef.current = null;
+                    }
+                    setPlayingStem(null);
+                    onOpenLibrary();
+                  }}
+                >
+                  <FolderOpen size={13} />
+                  ดูในคลังดาวน์โหลด
+                </button>
+              )}
+
+              <button
+                id="stem-split-again-btn"
+                className="split-again-btn"
+                onClick={() => {
+                  if (audioPreviewRef.current) {
+                    audioPreviewRef.current.pause();
+                    audioPreviewRef.current = null;
+                  }
+                  setPlayingStem(null);
+                  onReset();
+                }}
+              >
+                แยกเพลงอื่น
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -554,7 +684,75 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
         .splitter-result-body {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 10px;
+        }
+        .stem-success-banner {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: rgba(16, 185, 129, 0.12);
+          border: 1px solid rgba(16, 185, 129, 0.35);
+          border-radius: 10px;
+          padding: 10px 14px;
+        }
+        .success-banner-icon {
+          color: #34d399;
+          flex-shrink: 0;
+        }
+        .success-banner-text {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+        }
+        .success-banner-title {
+          font-size: 12px;
+          font-weight: 700;
+          color: #6ee7b7;
+        }
+        .success-banner-sub {
+          font-size: 11px;
+          color: rgba(209, 250, 229, 0.8);
+        }
+        .stem-play-btn {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(139, 92, 246, 0.2);
+          border: 1px solid rgba(139, 92, 246, 0.4);
+          color: #c4b5fd;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          flex-shrink: 0;
+        }
+        .stem-play-btn:hover {
+          background: rgba(139, 92, 246, 0.35);
+          color: #fff;
+          transform: scale(1.05);
+        }
+        .stem-play-btn.playing {
+          background: #7c3aed;
+          color: #fff;
+          border-color: #a78bfa;
+        }
+        .inst-play-btn {
+          background: rgba(16, 185, 129, 0.15);
+          border-color: rgba(16, 185, 129, 0.35);
+          color: #6ee7b7;
+        }
+        .inst-play-btn:hover {
+          background: rgba(16, 185, 129, 0.3);
+          color: #fff;
+        }
+        .inst-play-btn.playing {
+          background: #10b981;
+          color: #fff;
+          border-color: #34d399;
+        }
+        .play-icon-offset {
+          margin-left: 1.5px;
         }
         .stem-result-row {
           display: flex;
@@ -602,14 +800,67 @@ export const StemSplitterPanel: React.FC<StemSplitterPanelProps> = ({
           font-weight: 600;
           flex-shrink: 0;
         }
-        .split-again-btn {
+        .stem-actions-group {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
           margin-top: 4px;
+        }
+        .stem-apply-btn {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 11px 16px;
+          background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+          border: none;
+          border-radius: 10px;
+          color: #fff;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          box-shadow: 0 4px 16px rgba(139, 92, 246, 0.35);
+        }
+        .stem-apply-btn:hover {
+          background: linear-gradient(135deg, #9061f9 0%, #4f46e5 100%);
+          transform: translateY(-1px);
+          box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
+        }
+        .stem-secondary-actions {
+          display: flex;
+          gap: 8px;
+        }
+        .stem-library-btn {
+          flex: 1;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          background: rgba(30, 41, 59, 0.8);
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          border-radius: 8px;
+          color: #e2e8f0;
+          padding: 8px 12px;
+          font-size: 11.5px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.15s ease;
+        }
+        .stem-library-btn:hover {
+          background: rgba(51, 65, 85, 0.9);
+          border-color: rgba(56, 189, 248, 0.5);
+          color: #38bdf8;
+        }
+        .split-again-btn {
+          flex: 1;
           background: rgba(139,92,246,0.08);
           border: 1px solid rgba(139,92,246,0.2);
           border-radius: 8px;
           color: #a78bfa;
-          padding: 8px;
-          font-size: 12px;
+          padding: 8px 12px;
+          font-size: 11.5px;
           cursor: pointer;
           transition: all 0.15s ease;
           font-weight: 600;

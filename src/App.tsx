@@ -21,6 +21,7 @@ import {
   LoadedTrack,
   PitchFrame,
   RecordingStatus,
+  ScoreDifficulty,
 } from './types/audio';
 import {
   analyzeAudioFilePitchNative,
@@ -107,15 +108,25 @@ export default function App() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recStatus, setRecStatus] = useState<RecordingStatus | null>(null);
   const [liveMicFrame, setLiveMicFrame] = useState<PitchFrame | null>(null);
+  const [difficulty, setDifficulty] = useState<ScoreDifficulty>(() => {
+    return (localStorage.getItem('zonic_karaoke_difficulty') as ScoreDifficulty) || 'easy';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('zonic_karaoke_difficulty', difficulty);
+    } catch (e) {}
+  }, [difficulty]);
 
   // Modular Real-time Live Pitch Scoring Engine
-  const { overallScore, targetPitchFrame } = useLivePitchScoring({
+  const { overallScore, rawScore, targetPitchFrame, resetScore } = useLivePitchScoring({
     isPlaying,
     isRecording,
     liveMicFrame,
     vocalRefTrack,
     currentTimeSec,
     transposeKey,
+    difficulty,
   });
 
   // Scan Audio Input Devices on startup
@@ -268,10 +279,12 @@ export default function App() {
               console.warn('[App] Native pitch analysis warning, falling back to AudioBuffer:', pitchErr);
             }
             if (!nativeAnalysis?.pitch_frames || nativeAnalysis.pitch_frames.length === 0) {
-              try {
-                nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
-              } catch (webAudioErr) {
-                console.warn('[App] AudioBuffer pitch analysis warning:', webAudioErr);
+              if (audioBuffer.duration <= 90) {
+                try {
+                  nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
+                } catch (webAudioErr) {
+                  console.warn('[App] AudioBuffer pitch analysis warning:', webAudioErr);
+                }
               }
             }
           }
@@ -380,15 +393,22 @@ export default function App() {
     ).length;
   }, [downloadQueue]);
 
-  // Stem Splitter Hook — auto-loads vocal & instrumental into existing track slots
+  // Stem Splitter Hook — auto-loads vocal & instrumental into existing track slots & library
   const { splitState, startSplit, cancelSplit, resetSplit } = useStemSplitter({
-    onVocalReady: (filePath) => {
-      const sourceName = vocalRefTrack?.name ?? instrumentalTrack?.name ?? 'track';
-      handleAutoLoadDownloadedTrack('vocalRef', filePath, `Vocals — ${sourceName}`);
-    },
-    onInstrumentalReady: (filePath) => {
-      const sourceName = vocalRefTrack?.name ?? instrumentalTrack?.name ?? 'track';
-      handleAutoLoadDownloadedTrack('instrumental', filePath, `Instrumental — ${sourceName}`);
+    onComplete: async (vocalPath, instrumentalPath) => {
+      try {
+        // 1. Refresh Downloader Library immediately so both separated stems appear in Library tab
+        await refreshDownloadedLibrary();
+
+        // 2. Sequentially load tracks to prevent concurrency locks
+        const sourceName = vocalRefTrack?.name ?? instrumentalTrack?.name ?? 'track';
+        await handleAutoLoadDownloadedTrack('instrumental', instrumentalPath, `Instrumental — ${sourceName}`);
+        await handleAutoLoadDownloadedTrack('vocalRef', vocalPath, `Vocals — ${sourceName}`);
+
+        setStatusMsg(`แยกเสียงสำเร็จและบันทึกลงในคลังเพลงแล้ว: '${sourceName}'`);
+      } catch (err: any) {
+        console.warn('[App] Stem auto-load warning:', err);
+      }
     },
     onError: (message) => {
       setStatusMsg(`Stem split error: ${message}`);
@@ -649,6 +669,9 @@ export default function App() {
 
       let startAtSec = offsetSec !== undefined ? offsetSec : currentTimeSecRef.current;
       if (startAtSec >= maxDuration) startAtSec = 0;
+      if (startAtSec === 0) {
+        resetScore();
+      }
 
       // Play Instrumental Track
       if (instrumentalTrack?.audioBuffer) {
@@ -719,6 +742,7 @@ export default function App() {
       isRecording,
       maxDuration,
       playbackRate,
+      resetScore,
       stopPlayback,
       transposeKey,
       vocalRefTrack?.audioBuffer,
@@ -755,11 +779,14 @@ export default function App() {
     (timeSec: number) => {
       currentTimeSecRef.current = timeSec;
       setCurrentTimeSec(timeSec);
+      if (timeSec === 0) {
+        resetScore();
+      }
       if (isPlaying) {
         startPlayback(timeSec);
       }
     },
-    [isPlaying, startPlayback]
+    [isPlaying, resetScore, startPlayback]
   );
 
   // Draggable Splitter Mouse Drag Listener
@@ -888,6 +915,7 @@ export default function App() {
                 isRecording={isRecording}
                 transposeKey={transposeKey}
                 overallScore={overallScore}
+                rawScore={rawScore}
                 targetPitchFrame={targetPitchFrame}
                 lyricLines={lyricLines}
                 bpm={bpm}
@@ -897,6 +925,8 @@ export default function App() {
                 onAttachVideo={handleAttachVideo}
                 isPlaying={isPlaying}
                 playbackRate={playbackRate}
+                difficulty={difficulty}
+                onDifficultyChange={setDifficulty}
               />
             </div>
           </main>
@@ -943,6 +973,7 @@ export default function App() {
         overallScore={overallScore}
         vocalRefTrack={vocalRefTrack}
         transposeKey={transposeKey}
+        difficulty={difficulty}
       />
 
       <UrlDownloaderModal
@@ -996,6 +1027,12 @@ export default function App() {
                 onStartSplit={startSplit}
                 onCancelSplit={cancelSplit}
                 onReset={resetSplit}
+                onApplyAndClose={() => setIsSplitterOpen(false)}
+                onOpenLibrary={() => {
+                  setIsSplitterOpen(false);
+                  setIsDownloaderOpen(true);
+                  refreshDownloadedLibrary();
+                }}
               />
             </div>
           </div>

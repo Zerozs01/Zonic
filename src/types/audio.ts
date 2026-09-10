@@ -1,3 +1,5 @@
+export type ScoreDifficulty = 'easy' | 'normal' | 'hard';
+
 export interface AudioDevice {
   id: string;
   name: string;

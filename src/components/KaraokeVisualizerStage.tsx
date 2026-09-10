@@ -1,9 +1,10 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { PitchVisualizer } from './PitchVisualizer';
 import { KaraokeHUD } from './KaraokeHUD';
-import { LoadedTrack, PitchFrame } from '../types/audio';
+import { LoadedTrack, PitchFrame, ScoreDifficulty } from '../types/audio';
 import { LyricLine } from '../utils/audioAnalysis';
-import { Video, Activity, UploadCloud, Film } from 'lucide-react';
+import { Video, Activity, UploadCloud, Film, Layers } from 'lucide-react';
+import { StageViewMode } from '../hooks/useVideoSync';
 
 interface KaraokeVisualizerStageProps {
   vocalRefTrack: LoadedTrack | null;
@@ -15,16 +16,19 @@ interface KaraokeVisualizerStageProps {
   isRecording: boolean;
   transposeKey: number;
   overallScore: number;
+  rawScore?: number;
   targetPitchFrame: PitchFrame | null;
   lyricLines?: LyricLine[];
   bpm?: number;
   // Video Integration Props
-  viewMode?: 'stage' | 'video';
-  onViewModeChange?: (mode: 'stage' | 'video') => void;
+  viewMode?: StageViewMode;
+  onViewModeChange?: (mode: StageViewMode) => void;
   videoUrl?: string | null;
   onAttachVideo?: (file: File) => void;
   isPlaying?: boolean;
   playbackRate?: number;
+  difficulty?: ScoreDifficulty;
+  onDifficultyChange?: (mode: ScoreDifficulty) => void;
 }
 
 export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = React.memo(({
@@ -37,6 +41,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
   isRecording,
   transposeKey,
   overallScore,
+  rawScore,
   targetPitchFrame,
   lyricLines = [],
   bpm = 120,
@@ -46,6 +51,8 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
   onAttachVideo,
   isPlaying = false,
   playbackRate = 1.0,
+  difficulty = 'easy',
+  onDifficultyChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const videoFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -56,6 +63,12 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
   const lastFpsTimeRef = useRef<number>(0);
   const callbackIdRef = useRef<number | null>(null);
   const playPromiseRef = useRef<Promise<void> | null>(null);
+
+  // High-performance video sync refs
+  const currentTimeSecRef = useRef<number>(currentTimeSec);
+  currentTimeSecRef.current = currentTimeSec;
+  const prevTimeSecRef = useRef<number>(currentTimeSec);
+  const lastHardSeekTimeRef = useRef<number>(0);
 
   // Ensure video is strictly muted and volume zero so sound never leaks or plays un-pausably
   useEffect(() => {
@@ -121,7 +134,31 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
     };
   }, [videoUrl]);
 
-  // Synchronize HTML5 Video Play / Pause with Master Audio Engine
+  // 1. Deliberate Scrubbing & Pause Position Alignment
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoUrl) return;
+
+    const delta = currentTimeSec - prevTimeSecRef.current;
+    prevTimeSecRef.current = currentTimeSec;
+
+    // Detect deliberate scrub or user timeline jump (jumped > 0.8s or scrubbed backward)
+    if (Math.abs(delta) > 0.8 || delta < -0.15) {
+      video.currentTime = currentTimeSec;
+      lastHardSeekTimeRef.current = performance.now();
+      video.playbackRate = playbackRate;
+      return;
+    }
+
+    // When paused, strictly snap to current position so scrubbing reflects immediately
+    if (!isPlaying) {
+      if (Math.abs(video.currentTime - currentTimeSec) > 0.04) {
+        video.currentTime = currentTimeSec;
+      }
+    }
+  }, [currentTimeSec, isPlaying, playbackRate, videoUrl]);
+
+  // 2. Play / Pause Controller with Master Audio Engine
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
@@ -131,10 +168,13 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
     video.volume = 0;
 
     if (isPlaying) {
-      // Align position on play start if difference is noticeable (> 0.08s)
-      if (Math.abs(video.currentTime - currentTimeSec) > 0.08) {
-        video.currentTime = currentTimeSec;
+      // Snap position once on play start if slightly misaligned (> 0.05s)
+      if (Math.abs(video.currentTime - currentTimeSecRef.current) > 0.05) {
+        video.currentTime = currentTimeSecRef.current;
       }
+      lastHardSeekTimeRef.current = performance.now();
+      video.playbackRate = playbackRate;
+
       const p = video.play();
       playPromiseRef.current = p;
       if (p !== undefined) {
@@ -145,7 +185,6 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
         });
       }
     } else {
-      // Safely pause even if play() promise is still resolving
       if (playPromiseRef.current) {
         playPromiseRef.current
           .then(() => {
@@ -157,50 +196,63 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
       } else {
         video.pause();
       }
-      if (Math.abs(video.currentTime - currentTimeSec) > 0.05) {
-        video.currentTime = currentTimeSec;
+      if (Math.abs(video.currentTime - currentTimeSecRef.current) > 0.04) {
+        video.currentTime = currentTimeSecRef.current;
       }
     }
-  }, [isPlaying, videoUrl]);
+  }, [isPlaying, playbackRate, videoUrl]);
 
-  // High-Precision Smooth Synchronization (Phase-Locked Loop without judder or hard-seeking)
+  // 3. Smooth Phase-Locked Loop (PLL) Drift Correction (Interval-based: 350ms, NO rapid hook thrashing)
   useEffect(() => {
+    if (!isPlaying || !videoUrl) return;
     const video = videoRef.current;
-    if (!video || !videoUrl) return;
+    if (!video) return;
 
-    if (!isPlaying) {
-      if (!video.paused) {
-        video.pause();
+    const pllInterval = setInterval(() => {
+      if (!video || !isPlaying || video.paused || video.seeking) return;
+      // Allow 600ms grace period after play/seek before adjusting
+      if (performance.now() - lastHardSeekTimeRef.current < 600) return;
+
+      const audioTime = currentTimeSecRef.current;
+      const drift = audioTime - video.currentTime;
+      const absDrift = Math.abs(drift);
+
+      // Zone 0: Imperceptible drift (<= 50ms) -> keep normal playbackRate
+      if (absDrift <= 0.05) {
+        if (video.playbackRate !== playbackRate) {
+          video.playbackRate = playbackRate;
+        }
+        return;
       }
-      // When paused, snap directly to scrubbed position
-      if (Math.abs(video.currentTime - currentTimeSec) > 0.05) {
-        video.currentTime = currentTimeSec;
+
+      // Zone 1: Subtle micro-drift (0.05s to 0.35s) -> gentle ±2% rate nudge
+      if (absDrift <= 0.35) {
+        const nudgeRate = playbackRate * (drift > 0 ? 1.02 : 0.98);
+        if (Math.abs(video.playbackRate - nudgeRate) > 0.005) {
+          video.playbackRate = nudgeRate;
+        }
+        return;
       }
-      return;
-    }
 
+      // Zone 2: Moderate drift (0.35s to 1.8s) -> ±4.5% rate nudge
+      if (absDrift <= 1.8) {
+        const nudgeRate = playbackRate * (drift > 0 ? 1.045 : 0.955);
+        if (Math.abs(video.playbackRate - nudgeRate) > 0.005) {
+          video.playbackRate = nudgeRate;
+        }
+        return;
+      }
 
-    const drift = currentTimeSec - video.currentTime;
-    const absDrift = Math.abs(drift);
-
-    // 1. Hard seek ONLY on large desync (> 1.2s, e.g. user seek jump)
-    if (absDrift > 1.2) {
-      video.currentTime = currentTimeSec;
-      video.playbackRate = playbackRate;
-      return;
-    }
-
-    // 2. Micro-drift (0.06s - 1.2s): Smoothly nudge playbackRate without dropping frames
-    if (absDrift > 0.06) {
-      const nudge = drift > 0 ? 1.04 : 0.96;
-      video.playbackRate = playbackRate * nudge;
-    } else {
-      // 3. In sync (within 60ms): Lock at target playbackRate
-      if (video.playbackRate !== playbackRate) {
+      // Zone 3: Severe sustained desync (> 2.5s) -> hard seek with 3s cooldown
+      if (absDrift > 2.5 && performance.now() - lastHardSeekTimeRef.current > 3000) {
+        video.currentTime = audioTime;
+        lastHardSeekTimeRef.current = performance.now();
         video.playbackRate = playbackRate;
       }
-    }
-  }, [currentTimeSec, isPlaying, playbackRate, videoUrl]);
+    }, 350);
+
+    return () => clearInterval(pllInterval);
+  }, [isPlaying, playbackRate, videoUrl]);
 
   const handleVideoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0 && onAttachVideo) {
@@ -265,45 +317,141 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               liveMicFrame={liveMicFrame}
               isRecording={isRecording}
               overallScore={overallScore}
+              rawScore={rawScore}
               transposeKey={transposeKey}
               currentTimeSec={currentTimeSec}
               durationSec={durationSec}
               isPlaying={isPlaying}
+              difficulty={difficulty}
+              onDifficultyChange={onDifficultyChange}
             />
           </div>
 
-          {/* Quick Toggle Button on Stage Corner */}
+          {/* 3-Way Mode Segmented Control: [ Video | Score | Hybrid ] */}
           {onViewModeChange && (
-            <div className="pointer-events-auto ml-2 shrink-0">
+            <div className="pointer-events-auto ml-2 shrink-0 flex items-center bg-zinc-950/85 border border-zinc-700/80 rounded-xl p-0.5 shadow-lg backdrop-blur-md">
               <button
                 type="button"
-                onClick={() => onViewModeChange(viewMode === 'stage' ? 'video' : 'stage')}
-                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer ${
+                onClick={() => onViewModeChange('video')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
                   viewMode === 'video'
-                    ? 'bg-cyan-950/80 border-cyan-500/60 text-cyan-200 hover:bg-cyan-900/80 hover:border-cyan-400'
-                    : 'bg-purple-950/80 border-purple-500/60 text-purple-200 hover:bg-purple-900/80 hover:border-purple-400'
+                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/30'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
                 }`}
-                title={viewMode === 'stage' ? 'สลับไปโหมดวิดีโอคาราโอเกะ' : 'สลับไปโหมดกราฟคะแนน'}
+                title="โหมดวิดีโอเต็มจอ (Video 100%)"
               >
-                {viewMode === 'stage' ? (
-                  <>
-                    <Video size={13} className="text-cyan-400" />
-                    <span>สลับเป็นวิดีโอ</span>
-                  </>
-                ) : (
-                  <>
-                    <Activity size={13} className="text-purple-400" />
-                    <span>สลับเป็นคะแนน</span>
-                  </>
-                )}
+                <Video size={12} />
+                <span>Video</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onViewModeChange('stage')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'stage'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-500/30'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+                title="โหมดกราฟคะแนนเต็มจอ (Score 100%)"
+              >
+                <Activity size={12} />
+                <span>Score</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onViewModeChange('hybrid')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'hybrid'
+                    ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/30 font-extrabold'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+                title="โหมดผสม: วิดีโอ 70% + กราฟคะแนน 30% (Hybrid 70/30)"
+              >
+                <Layers size={12} />
+                <span>Hybrid</span>
               </button>
             </div>
           )}
         </div>
 
-        {/* ── Mode 1: Pitch Roll Canvas Stage ── */}
-        {viewMode === 'stage' && (
-          <div className="w-full flex-1 relative overflow-hidden">
+        {/* ── Viewport Display (Supports 'stage', 'video', and 'hybrid' seamlessly) ── */}
+        <div className="w-full flex-1 flex flex-col min-h-0 relative overflow-hidden">
+          {/* Video Pane: 100% in 'video', 70% in 'hybrid', hidden in 'stage' */}
+          <div
+            className={`w-full relative z-10 flex items-center justify-center bg-black overflow-hidden transition-all duration-200 ${
+              viewMode === 'video'
+                ? 'h-full flex-1'
+                : viewMode === 'hybrid'
+                ? 'h-[70%] border-b border-purple-500/30'
+                : 'hidden'
+            }`}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            onDrop={handleVideoDrop}
+          >
+            {videoUrl ? (
+              <>
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  muted
+                  playsInline
+                  preload="auto"
+                  style={{
+                    transform: 'translateZ(0)',
+                    backfaceVisibility: 'hidden',
+                    willChange: 'transform',
+                  }}
+                  className="w-full h-full object-contain pointer-events-none"
+                />
+
+                {/* Real-time Video Telemetry Overlay Badge (Resolution, Stream FPS & Display Sync) */}
+                {videoTelemetry && (
+                  <div className="absolute top-16 left-4 z-20 flex items-center gap-2 bg-zinc-950/80 border border-zinc-800/80 rounded-lg px-2.5 py-1 text-[11px] font-mono text-zinc-300 backdrop-blur-md shadow-lg pointer-events-none select-none">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>{videoTelemetry.resolution}</span>
+                    <span className="text-zinc-500">•</span>
+                    <span className="text-cyan-300 font-bold">
+                      {videoTelemetry.fps > 0 ? `${videoTelemetry.fps} FPS` : 'V-Sync'}
+                    </span>
+                    <span className="text-zinc-500">•</span>
+                    <span className="text-emerald-400 font-semibold">100Hz Smooth</span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div
+                onClick={() => videoFileInputRef.current?.click()}
+                className="flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-zinc-700/80 hover:border-cyan-500/80 rounded-2xl bg-zinc-900/40 hover:bg-zinc-900/70 transition-all cursor-pointer max-w-md mx-4"
+              >
+                <div className="p-3 rounded-2xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 mb-2 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+                  <Film size={28} />
+                </div>
+                <h3 className="text-xs font-bold text-white mb-1">ยังไม่มีคลิปวิดีโอคาราโอเกะ</h3>
+                <p className="text-[11px] text-zinc-400 mb-3 leading-relaxed">
+                  คลิกเพื่อเลือกไฟล์วิดีโอ (.mp4, .webm) หรือลากไฟล์มาวางในบริเวณนี้
+                </p>
+                <button
+                  type="button"
+                  className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center gap-2 transition-all shadow-md cursor-pointer"
+                >
+                  <UploadCloud size={14} />
+                  <span>เลือกไฟล์วิดีโอจากเครื่อง</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Pitch Visualizer Pane: 100% in 'stage', 30% in 'hybrid', hidden in 'video' */}
+          <div
+            className={`w-full relative overflow-hidden transition-all duration-200 ${
+              viewMode === 'stage'
+                ? 'h-full flex-1'
+                : viewMode === 'hybrid'
+                ? 'h-[30%]'
+                : 'hidden'
+            }`}
+          >
             <PitchVisualizer
               vocalRefTrack={vocalRefTrack}
               instrumentalTrack={instrumentalTrack}
@@ -317,65 +465,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               isPlaying={isPlaying}
             />
           </div>
-        )}
-
-        {/* ── Mode 2: Karaoke Video Player Stage ── */}
-        {viewMode === 'video' && (
-          <div
-            className="w-full h-full relative z-10 flex items-center justify-center bg-black overflow-hidden"
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-            onDrop={handleVideoDrop}
-          >
-            {videoUrl ? (
-              <>
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  muted
-                  playsInline
-                  style={{
-                    transform: 'translateZ(0)',
-                    backfaceVisibility: 'hidden',
-                    willChange: 'transform',
-                  }}
-                  className="w-full h-full object-contain pointer-events-none"
-                />
-
-                {/* Real-time Video Telemetry Overlay Badge (Resolution & Measured Render FPS) */}
-                {videoTelemetry && (
-                  <div className="absolute top-16 left-4 z-20 flex items-center gap-2 bg-zinc-950/75 border border-zinc-800/80 rounded-lg px-2.5 py-1 text-[11px] font-mono text-zinc-300 backdrop-blur-md shadow-lg pointer-events-none select-none">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>{videoTelemetry.resolution}</span>
-                    <span className="text-zinc-500">•</span>
-                    <span className="text-cyan-300 font-bold">
-                      {videoTelemetry.fps > 0 ? `${videoTelemetry.fps} FPS` : 'Detecting FPS...'}
-                    </span>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div
-                onClick={() => videoFileInputRef.current?.click()}
-                className="flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-zinc-700/80 hover:border-cyan-500/80 rounded-2xl bg-zinc-900/40 hover:bg-zinc-900/70 transition-all cursor-pointer max-w-md mx-4"
-              >
-                <div className="p-4 rounded-2xl bg-cyan-950/60 border border-cyan-500/40 text-cyan-300 mb-3 shadow-[0_0_20px_rgba(6,182,212,0.2)]">
-                  <Film size={36} />
-                </div>
-                <h3 className="text-sm font-bold text-white mb-1">ยังไม่มีคลิปวิดีโอคาราโอเกะ</h3>
-                <p className="text-xs text-zinc-400 mb-4 leading-relaxed">
-                  คลิกเพื่อเลือกไฟล์วิดีโอ (.mp4, .webm) หรือลากไฟล์มาวางในบริเวณนี้ เพื่อดูภาพและเนื้อร้องคาราโอเกะจากคลิปโดยตรง
-                </p>
-                <button
-                  type="button"
-                  className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs flex items-center gap-2 transition-all shadow-md cursor-pointer"
-                >
-                  <UploadCloud size={15} />
-                  <span>เลือกไฟล์วิดีโอจากเครื่อง</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
+        </div>
 
         {/* WeSing Bottom Karaoke Lyric Highlight Overlay (Only shown on Stage mode, or when Video has no internal lyrics) */}
         {viewMode === 'stage' && (

@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Trophy, Music, Mic, CheckCircle2 } from 'lucide-react';
-import { LoadedTrack } from '../types/audio';
+import { LoadedTrack, ScoreDifficulty } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
 interface PerformanceModalProps {
@@ -9,6 +9,7 @@ interface PerformanceModalProps {
   overallScore: number;
   vocalRefTrack: LoadedTrack | null;
   transposeKey: number;
+  difficulty?: ScoreDifficulty;
 }
 
 export const PerformanceModal: React.FC<PerformanceModalProps> = ({
@@ -17,17 +18,30 @@ export const PerformanceModal: React.FC<PerformanceModalProps> = ({
   overallScore,
   vocalRefTrack,
   transposeKey,
+  difficulty = 'easy',
 }) => {
   if (!isOpen) return null;
 
-  const getScoreGrade = (score: number) => {
-    if (score >= 90) return { grade: 'S+', title: '🔥 สุดยอดมาก! เสียงเป๊ะตรงคีย์', color: '#10b981' };
-    if (score >= 80) return { grade: 'A', title: '⭐ ร้องไพเราะ คุม pitch ได้ดีเยี่ยม', color: '#00f2fe' };
-    if (score >= 70) return { grade: 'B', title: '👍 อยู่ในเกณฑ์ดี มีหลุดคีย์เล็กน้อย', color: '#f59e0b' };
-    return { grade: 'C', title: '🎤 ต้องฝึกซ้อมเพิ่มเติมอีกนิด สู้ๆ!', color: '#a855f7' };
+  const getScoreGrade = (score: number, mode: ScoreDifficulty = 'easy') => {
+    if (mode === 'easy') {
+      if (score >= 75) return { grade: 'S+', title: '🔥 สุดยอดมาก! เสียงเป๊ะตรงคีย์ (Easy)', color: '#10b981' };
+      if (score >= 60) return { grade: 'A', title: '⭐ ร้องไพเราะ คุม pitch ได้ดีเยี่ยม', color: '#00f2fe' };
+      if (score >= 45) return { grade: 'B', title: '👍 อยู่ในเกณฑ์ดี มีหลุดคีย์เล็กน้อย', color: '#f59e0b' };
+      return { grade: 'C', title: '🎤 ซ้อมอีกนิด สู้ๆ ฝึกร้องบ่อยๆ จะเก่งขึ้น!', color: '#a855f7' };
+    } else if (mode === 'normal') {
+      if (score >= 85) return { grade: 'S+', title: '🔥 สุดยอดมาก! มาตรฐานนักร้อง', color: '#10b981' };
+      if (score >= 70) return { grade: 'A', title: '⭐ ร้องไพเราะ คุม pitch ได้ดีเยี่ยม', color: '#00f2fe' };
+      if (score >= 50) return { grade: 'B', title: '👍 อยู่ในเกณฑ์ดี มีหลุดคีย์เล็กน้อย', color: '#f59e0b' };
+      return { grade: 'C', title: '🎤 ต้องฝึกซ้อมเพิ่มเติมอีกนิด สู้ๆ!', color: '#a855f7' };
+    } else {
+      if (score >= 90) return { grade: 'S+', title: '🔥 โหดมาก! ระดับนักร้องมืออาชีพ (Hard)', color: '#10b981' };
+      if (score >= 80) return { grade: 'A', title: '⭐ เป๊ะคีย์มาก แทบไม่หลุดโน้ต', color: '#00f2fe' };
+      if (score >= 65) return { grade: 'B', title: '👍 เกณฑ์ดี มีโดนหักคะแนนท่อนยาก', color: '#f59e0b' };
+      return { grade: 'C', title: '🎤 โหมด Hard มีหักคะแนน Miss ลองซ้อมโหมด Easy ก่อนได้นะ', color: '#a855f7' };
+    }
   };
 
-  const info = getScoreGrade(overallScore);
+  const info = getScoreGrade(overallScore, difficulty);
   const minHz = vocalRefTrack?.analysis?.min_pitch_hz || 0;
   const maxHz = vocalRefTrack?.analysis?.max_pitch_hz || 0;
   const minNote = minHz > 0 ? hzToNote(minHz).noteName : '---';

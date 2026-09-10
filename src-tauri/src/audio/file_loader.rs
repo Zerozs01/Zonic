@@ -48,8 +48,95 @@ pub fn read_audio_file(path_str: &str) -> Result<DecodedAudio, String> {
         }
     }
 
+    // Direct FFmpeg path for video and AAC/M4A containers where Symphonia lacks codecs
+    if matches!(extension.as_str(), "mp4" | "webm" | "mkv" | "mov" | "m4a" | "aac") {
+        if let Ok(decoded) = read_via_ffmpeg(path_str, &file_name) {
+            return Ok(decoded);
+        }
+    }
+
     // Fallback/Generic decoder using Symphonia (MP3, WAV, etc.)
-    read_generic_symphonia(path_str, &file_name)
+    match read_generic_symphonia(path_str, &file_name) {
+        Ok(decoded) => Ok(decoded),
+        Err(symph_err) => {
+            // Final fallback to FFmpeg for any complex or unsupported codec
+            read_via_ffmpeg(path_str, &file_name).map_err(|ffmpeg_err| {
+                format!("{}. FFmpeg fallback also failed: {}", symph_err, ffmpeg_err)
+            })
+        }
+    }
+}
+
+fn read_via_ffmpeg(path_str: &str, file_name: &str) -> Result<DecodedAudio, String> {
+    #[cfg(windows)]
+    let output = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("ffmpeg")
+            .args([
+                "-v", "error",
+                "-i", path_str,
+                "-vn",
+                "-acodec", "pcm_f32le",
+                "-ar", "44100",
+                "-ac", "1",
+                "-f", "f32le",
+                "-"
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("FFmpeg launch error: {}", e))?
+    };
+
+    #[cfg(not(windows))]
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-v", "error",
+            "-i", path_str,
+            "-vn",
+            "-acodec", "pcm_f32le",
+            "-ar", "44100",
+            "-ac", "1",
+            "-f", "f32le",
+            "-"
+        ])
+        .output()
+        .map_err(|e| format!("FFmpeg launch error: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "FFmpeg failed to extract audio: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let bytes = output.stdout;
+    if bytes.is_empty() {
+        return Err("FFmpeg produced empty audio output".to_string());
+    }
+
+    let sample_count = bytes.len() / 4;
+    let mut samples = Vec::with_capacity(sample_count);
+    for chunk in bytes.chunks_exact(4) {
+        let val = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        samples.push(val);
+    }
+
+    let duration_seconds = samples.len() as f32 / 44100.0;
+    let peak_amplitude = calculate_peak(&samples);
+
+    Ok(DecodedAudio {
+        meta: AudioFileMeta {
+            file_path: path_str.to_string(),
+            file_name: file_name.to_string(),
+            sample_rate: 44100,
+            channels: 1,
+            duration_seconds,
+            total_samples: samples.len(),
+            peak_amplitude,
+        },
+        samples,
+    })
 }
 
 fn read_wav_hound(path_str: &str, file_name: &str) -> Result<DecodedAudio, String> {

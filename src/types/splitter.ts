@@ -60,7 +60,7 @@ export const INITIAL_SPLITTER_STATE: StemSplitterState = {
   vocalPath: null,
   instrumentalPath: null,
   error: null,
-  modelUsed: 'mdx_extra_q',
+  modelUsed: 'htdemucs',
 };
 
 // ── Model display info ──────────────────────────────────────────
@@ -75,30 +75,30 @@ export interface ModelInfo {
 
 export const STEM_MODELS: ModelInfo[] = [
   {
+    id: 'htdemucs',
+    label: 'HT-Demucs (Recommended)',
+    description: 'Fastest single model — 4x faster with best vocal fidelity',
+    speed: 'Fast',
+    quality: 'Best',
+  },
+  {
     id: 'mdx_extra_q',
     label: 'MDX Extra Q',
-    description: 'Fastest — Quantized model, good for quick previews',
-    speed: 'Fast',
+    description: 'Quantized 4-model ensemble, balanced CPU memory',
+    speed: 'Medium',
     quality: 'Good',
   },
   {
     id: 'mdx_extra',
     label: 'MDX Extra',
-    description: 'Balanced quality and speed',
-    speed: 'Medium',
-    quality: 'Better',
-  },
-  {
-    id: 'htdemucs',
-    label: 'HT-Demucs',
-    description: 'High quality hybrid transformer',
+    description: 'Full 4-model ensemble for classic stem separation',
     speed: 'Slow',
-    quality: 'Best',
+    quality: 'Better',
   },
   {
     id: 'htdemucs_ft',
     label: 'HT-Demucs FT',
-    description: 'Fine-tuned for pop/rock vocals — Best overall',
+    description: 'Fine-tuned 4-model bag — maximum studio quality',
     speed: 'Slow',
     quality: 'Best',
   },

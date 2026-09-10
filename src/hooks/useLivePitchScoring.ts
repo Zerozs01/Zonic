@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { LoadedTrack, PitchFrame } from '../types/audio';
+import { LoadedTrack, PitchFrame, ScoreDifficulty } from '../types/audio';
 
 interface UseLivePitchScoringProps {
   isPlaying: boolean;
@@ -8,6 +8,7 @@ interface UseLivePitchScoringProps {
   vocalRefTrack: LoadedTrack | null;
   currentTimeSec: number;
   transposeKey: number;
+  difficulty?: ScoreDifficulty;
 }
 
 export function useLivePitchScoring({
@@ -17,14 +18,35 @@ export function useLivePitchScoring({
   vocalRefTrack,
   currentTimeSec,
   transposeKey,
+  difficulty = 'easy',
 }: UseLivePitchScoringProps) {
-  const [overallScore, setOverallScore] = useState<number>(100);
-  const scoreHistoryRef = useRef<number[]>([]);
+  const [overallScore, setOverallScore] = useState<number>(0);
+  const [rawScore, setRawScore] = useState<number>(0);
+
+  // Map of scored target frame timestamps -> points earned
+  const scoredFramesRef = useRef<Map<number, number>>(new Map());
+  const accumulatedScoreRef = useRef<number>(0);
+
+  // Total possible score based on total voiced target frames in the track
+  const maxScore = useMemo(() => {
+    const voicedCount =
+      vocalRefTrack?.analysis?.voiced_frames ??
+      vocalRefTrack?.analysis?.pitch_frames?.filter((f) => f.is_voiced).length ??
+      1000;
+    return Math.max(100, voicedCount * 10);
+  }, [vocalRefTrack]);
 
   const resetScore = useCallback(() => {
-    scoreHistoryRef.current = [];
-    setOverallScore(100);
+    scoredFramesRef.current.clear();
+    accumulatedScoreRef.current = 0;
+    setRawScore(0);
+    setOverallScore(0);
   }, []);
+
+  // Reset score when loaded vocal track or difficulty changes
+  useEffect(() => {
+    resetScore();
+  }, [vocalRefTrack?.filePath, difficulty, resetScore]);
 
   // Target Pitch Frame for HUD (timestamp-aligned with vocal guide)
   const targetPitchFrame = useMemo<PitchFrame | null>(() => {
@@ -59,7 +81,7 @@ export function useLivePitchScoring({
     const currentFrame = frames[bestIdx];
     // If the exact frame is unvoiced (e.g. brief consonant < 60ms), check adjacent frames
     if (!currentFrame.is_voiced) {
-      for (let offset of [-1, 1, -2, 2]) {
+      for (const offset of [-1, 1, -2, 2]) {
         const neighbor = frames[bestIdx + offset];
         if (neighbor && neighbor.is_voiced && Math.abs(neighbor.timestamp_ms - timeMs) <= 60) {
           return neighbor;
@@ -70,37 +92,118 @@ export function useLivePitchScoring({
     return currentFrame || null;
   }, [vocalRefTrack, currentTimeSec]);
 
-
-  // Update real-time pitch match score
+  // Dynamic Scoring Engine: Easy (Octave Invariance / Forgiving), Normal (Balanced Singer Standard), Hard (Strict + Penalty)
   useEffect(() => {
     if (
-      isPlaying &&
-      isRecording &&
-      liveMicFrame?.is_voiced &&
-      targetPitchFrame?.is_voiced &&
-      targetPitchFrame.frequency_hz > 0
+      !isPlaying ||
+      !isRecording ||
+      !targetPitchFrame?.is_voiced ||
+      targetPitchFrame.frequency_hz <= 0
     ) {
+      return;
+    }
+
+    const frameTime = targetPitchFrame.timestamp_ms;
+    const existingPts = scoredFramesRef.current.get(frameTime);
+
+    let pts = 0;
+    if (liveMicFrame?.is_voiced && liveMicFrame.frequency_hz > 0) {
       const transposedTargetHz =
         transposeKey !== 0
           ? targetPitchFrame.frequency_hz * Math.pow(2, transposeKey / 12)
           : targetPitchFrame.frequency_hz;
 
-      const cents = Math.abs(1200 * Math.log2(liveMicFrame.frequency_hz / transposedTargetHz));
-      const frameScore = Math.max(0, Math.min(100, Math.round(100 - cents * 0.8)));
-      scoreHistoryRef.current.push(frameScore);
+      const rawCents = 1200 * Math.log2(liveMicFrame.frequency_hz / transposedTargetHz);
+      const absRawCents = Math.abs(rawCents);
 
-      if (scoreHistoryRef.current.length > 50) {
-        scoreHistoryRef.current.shift();
+      // Octave Folding: Calculate distance to nearest octave harmonic ([-600, +600] cents)
+      // Solves unseparated MP4 instrumental artifacts (Octave 5 metronome/synths) and male singing female songs
+      const octaveOffset = ((rawCents % 1200) + 1800) % 1200 - 600;
+      const foldedDiff = Math.abs(octaveOffset);
+
+      if (difficulty === 'easy') {
+        // Easy Mode: Full octave invariance + generous tolerances (miss = +0, no deduction)
+        const cents = foldedDiff;
+        if (cents <= 45) {
+          pts = 10; // Perfect
+        } else if (cents <= 85) {
+          pts = 7;  // Great
+        } else if (cents <= 130) {
+          pts = 4;  // Good
+        } else {
+          pts = 0;  // Miss (+0)
+        }
+      } else if (difficulty === 'normal') {
+        // Normal Mode: Singer benchmark with gentle octave transfer allowance
+        const cents = absRawCents <= 600 ? absRawCents : foldedDiff + 10;
+        if (cents <= 30) {
+          pts = 10; // Perfect
+        } else if (cents <= 60) {
+          pts = 7;  // Great
+        } else if (cents <= 90) {
+          pts = 4;  // Good
+        } else {
+          pts = 0;  // Miss (+0)
+        }
+      } else {
+        // Hard Mode: Strict pro mode - requires exact octave and penalizes severe off-pitch
+        const cents = absRawCents;
+        if (cents <= 20) {
+          pts = 10; // Perfect
+        } else if (cents <= 40) {
+          pts = 6;  // Great
+        } else if (cents <= 65) {
+          pts = 3;  // Good
+        } else if (cents <= 120) {
+          pts = 1;  // Near match (+1)
+        } else {
+          pts = -3; // Far off-pitch (-3 deduction)
+        }
       }
-
-      const avg = scoreHistoryRef.current.reduce((a, b) => a + b, 0) / scoreHistoryRef.current.length;
-      const roundedAvg = Math.round(avg);
-      setOverallScore((prev) => (prev !== roundedAvg ? roundedAvg : prev));
+    } else {
+      pts = 0; // Unvoiced / natural breath (never penalize breath gaps)
     }
-  }, [isPlaying, isRecording, liveMicFrame, targetPitchFrame, transposeKey]);
+
+    if (existingPts === undefined) {
+      // First encounter of this target frame
+      scoredFramesRef.current.set(frameTime, pts);
+      const nextAcc = Math.max(0, accumulatedScoreRef.current + pts);
+      accumulatedScoreRef.current = nextAcc;
+      setRawScore(nextAcc);
+      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
+      setOverallScore(newOverall);
+    } else if (pts > existingPts) {
+      // Practicing / rewound: user improved their hit! Add the score difference
+      const diff = pts - existingPts;
+      scoredFramesRef.current.set(frameTime, pts);
+      const nextAcc = Math.max(0, accumulatedScoreRef.current + diff);
+      accumulatedScoreRef.current = nextAcc;
+      setRawScore(nextAcc);
+      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
+      setOverallScore(newOverall);
+    } else if (difficulty === 'hard' && pts < 0 && existingPts >= 0) {
+      // Hard mode: re-singing a frame badly penalizes
+      const diff = pts - existingPts;
+      scoredFramesRef.current.set(frameTime, pts);
+      const nextAcc = Math.max(0, accumulatedScoreRef.current + diff);
+      accumulatedScoreRef.current = nextAcc;
+      setRawScore(nextAcc);
+      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
+      setOverallScore(newOverall);
+    }
+  }, [
+    isPlaying,
+    isRecording,
+    liveMicFrame,
+    targetPitchFrame,
+    transposeKey,
+    maxScore,
+    difficulty,
+  ]);
 
   return {
     overallScore,
+    rawScore,
     targetPitchFrame,
     resetScore,
   };

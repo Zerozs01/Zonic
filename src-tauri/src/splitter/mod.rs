@@ -38,8 +38,8 @@ impl StemModel {
 
 impl Default for StemModel {
     fn default() -> Self {
-        // mdx_extra_q = fastest, quantized — best for first-time users
-        StemModel::MdxExtraQ
+        // htdemucs = Meta v4 high-speed single model (4x faster than 4-model ensembles)
+        StemModel::Htdemucs
     }
 }
 
@@ -87,29 +87,53 @@ impl SplitterState {
 // Helpers
 // ─────────────────────────────────────────────────────────────────
 
-/// Resolve the splitter.py script from resource_dir or dev-time paths.
+/// Resolve the splitter.py script from resource_dir, exe ancestors, or dev-time paths.
 fn resolve_script_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let candidates: Vec<PathBuf> = {
-        let mut v = vec![
-            PathBuf::from("scripts").join("splitter.py"),
-            PathBuf::from("src-tauri").join("scripts").join("splitter.py"),
-        ];
-        if let Ok(resource_dir) = app.path().resource_dir() {
-            v.push(resource_dir.join("scripts").join("splitter.py"));
-            v.push(resource_dir.join("splitter.py"));
-        }
-        v
-    };
+    let mut candidates = Vec::new();
 
-    for p in &candidates {
-        if p.exists() {
-            return Ok(p.clone());
+    // 1. Direct relative paths
+    candidates.push(PathBuf::from("scripts").join("splitter.py"));
+    candidates.push(PathBuf::from("src-tauri").join("scripts").join("splitter.py"));
+
+    // 2. Tauri resource_dir (for production bundles)
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        candidates.push(resource_dir.join("scripts").join("splitter.py"));
+        candidates.push(resource_dir.join("splitter.py"));
+    }
+
+    // 3. Executable directory & its ancestor directories (handles target/release, target/debug, etc.)
+    if let Ok(exe_path) = std::env::current_exe() {
+        for ancestor in exe_path.ancestors().take(6) {
+            candidates.push(ancestor.join("scripts").join("splitter.py"));
+            candidates.push(ancestor.join("src-tauri").join("scripts").join("splitter.py"));
+            candidates.push(ancestor.join("splitter.py"));
+        }
+    }
+
+    // 4. Current working directory ancestors
+    if let Ok(cwd) = std::env::current_dir() {
+        for ancestor in cwd.ancestors().take(6) {
+            candidates.push(ancestor.join("scripts").join("splitter.py"));
+            candidates.push(ancestor.join("src-tauri").join("scripts").join("splitter.py"));
+            candidates.push(ancestor.join("splitter.py"));
+        }
+    }
+
+    let mut checked = std::collections::HashSet::new();
+    let mut search_log = Vec::new();
+
+    for p in candidates {
+        if checked.insert(p.clone()) {
+            if p.exists() {
+                return Ok(p);
+            }
+            search_log.push(p);
         }
     }
 
     Err(format!(
         "splitter.py not found. Searched: {:?}",
-        candidates
+        search_log
     ))
 }
 
@@ -191,7 +215,9 @@ pub async fn split_audio_stems(
 
     // ── Build command ──────────────────────────────────────────
     let mut cmd = Command::new(&python_path);
-    cmd.arg(&script_path)
+    cmd.env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
+        .arg(&script_path)
         .arg("--input")
         .arg(&input_path)
         .arg("--output")
@@ -316,38 +342,22 @@ pub async fn split_audio_stems(
     }
 
     // ── Extract result ─────────────────────────────────────────
-    match result_event {
+    let (raw_vocal, raw_inst, duration_secs) = match result_event {
         Some(SplitterOutputEvent::Result {
             vocal_path,
             instrumental_path,
             duration_secs,
-        }) => {
-            let payload = SplitCompletePayload {
-                job_id: job_id.clone(),
-                vocal_path,
-                instrumental_path,
-                duration_secs,
-                model_used: model_str,
-            };
-            let _ = app.emit("separation-complete", payload.clone());
-            let _ = app.emit("split-complete", payload.clone());
-            Ok(payload)
-        }
+        }) => (vocal_path, instrumental_path, duration_secs),
         _ => {
             // Fallback: search output_dir for expected files
             let vocal = output_dir.join("vocals.wav");
             let inst = output_dir.join("no_vocals.wav");
             if vocal.exists() && inst.exists() {
-                let payload = SplitCompletePayload {
-                    job_id: job_id.clone(),
-                    vocal_path: vocal.to_string_lossy().to_string(),
-                    instrumental_path: inst.to_string_lossy().to_string(),
-                    duration_secs: 0.0,
-                    model_used: model_str,
-                };
-                let _ = app.emit("separation-complete", payload.clone());
-                let _ = app.emit("split-complete", payload.clone());
-                Ok(payload)
+                (
+                    vocal.to_string_lossy().to_string(),
+                    inst.to_string_lossy().to_string(),
+                    0.0,
+                )
             } else {
                 let msg = "Splitter completed but output files not found".to_string();
                 let err_payload = SplitErrorPayload {
@@ -357,10 +367,62 @@ pub async fn split_audio_stems(
                 };
                 let _ = app.emit("separation-error", err_payload.clone());
                 let _ = app.emit("split-error", err_payload);
-                Err(msg)
+                return Err(msg);
             }
         }
+    };
+
+    // ── Auto-save stems to Downloads Library (Persistent) ──────
+    let mut final_vocal = raw_vocal.clone();
+    let mut final_inst = raw_inst.clone();
+
+    if let Ok(cache_base) = app.path().app_cache_dir().or_else(|_| app.path().app_data_dir()) {
+        let download_dir = cache_base.join("downloads");
+        let _ = std::fs::create_dir_all(&download_dir);
+
+        let input_stem = Path::new(&input_path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("track");
+
+        let clean_base = input_stem
+            .replace("[Vocals] ", "")
+            .replace("[Instrumental] ", "")
+            .replace("[KARAOKE] ", "");
+
+        let sanitized: String = clean_base
+            .chars()
+            .map(|c| {
+                if matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|' | '/' | '\\') {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let sanitized = sanitized.trim();
+
+        let lib_vocal = download_dir.join(format!("[Vocals] {}.wav", sanitized));
+        let lib_inst = download_dir.join(format!("[Instrumental] {}.wav", sanitized));
+
+        if std::fs::copy(&raw_vocal, &lib_vocal).is_ok() {
+            final_vocal = lib_vocal.to_string_lossy().to_string();
+        }
+        if std::fs::copy(&raw_inst, &lib_inst).is_ok() {
+            final_inst = lib_inst.to_string_lossy().to_string();
+        }
     }
+
+    let payload = SplitCompletePayload {
+        job_id: job_id.clone(),
+        vocal_path: final_vocal,
+        instrumental_path: final_inst,
+        duration_secs,
+        model_used: model_str,
+    };
+    let _ = app.emit("separation-complete", payload.clone());
+    let _ = app.emit("split-complete", payload.clone());
+    Ok(payload)
 }
 
 #[tauri::command]

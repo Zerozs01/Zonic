@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { isTauriAvailable, saveUploadedAudioNative } from '../services/tauriBridge';
 
+export type StageViewMode = 'stage' | 'video' | 'hybrid';
+
 export function useVideoSync(onStatusChange?: (msg: string) => void) {
-  const [viewMode, setViewMode] = useState<'stage' | 'video'>('stage');
+  const [viewMode, setViewMode] = useState<StageViewMode>('stage');
   const [currentVideoUrl, setCurrentVideoUrl] = useState<string | null>(null);
   const prevVideoUrlRef = useRef<string | null>(null);
 

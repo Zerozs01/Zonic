@@ -1,6 +1,6 @@
 import React from 'react';
-import { ArrowLeft, MoreVertical, Music, Mic, Zap, Music2 } from 'lucide-react';
-import { PitchFrame } from '../types/audio';
+import { MoreVertical, Music, Mic, Zap, Music2 } from 'lucide-react';
+import { PitchFrame, ScoreDifficulty } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
 interface KaraokeHUDProps {
@@ -8,10 +8,13 @@ interface KaraokeHUDProps {
   liveMicFrame: PitchFrame | null;
   isRecording: boolean;
   overallScore: number;
+  rawScore?: number;
   transposeKey?: number;
   currentTimeSec?: number;
   durationSec?: number;
   isPlaying?: boolean;
+  difficulty?: ScoreDifficulty;
+  onDifficultyChange?: (mode: ScoreDifficulty) => void;
 }
 
 const GRADES = ['C', 'B', 'A', 'S', 'SS', 'SSS'];
@@ -21,10 +24,13 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   liveMicFrame,
   isRecording,
   overallScore,
+  rawScore,
   transposeKey = 0,
   currentTimeSec = 0,
   durationSec = 0,
   isPlaying = false,
+  difficulty = 'easy',
+  onDifficultyChange,
 }) => {
   const formatTime = (sec: number) => {
     if (isNaN(sec) || sec <= 0) return '00:00';
@@ -33,16 +39,35 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const getGradeInfo = (score: number) => {
-    if (score >= 95) return { activeIndex: 5, grade: 'SSS', color: 'from-amber-300 to-yellow-500 text-zinc-950 shadow-yellow-500/50' };
-    if (score >= 88) return { activeIndex: 4, grade: 'SS', color: 'from-yellow-400 to-amber-500 text-zinc-950 shadow-yellow-500/40' };
-    if (score >= 78) return { activeIndex: 3, grade: 'S', color: 'from-purple-400 to-indigo-500 text-white shadow-purple-500/40' };
-    if (score >= 68) return { activeIndex: 2, grade: 'A', color: 'from-cyan-400 to-blue-500 text-white shadow-cyan-500/40' };
-    if (score >= 55) return { activeIndex: 1, grade: 'B', color: 'from-emerald-400 to-teal-500 text-white shadow-emerald-500/30' };
-    return { activeIndex: 0, grade: 'C', color: 'from-zinc-500 to-zinc-700 text-zinc-200 shadow-zinc-700/30' };
+  const getGradeInfo = (score: number, mode: ScoreDifficulty) => {
+    if (mode === 'easy') {
+      // Easy Mode: Generous thresholds tailored for karaoke practice
+      if (score >= 85) return { activeIndex: 5, grade: 'SSS', color: 'from-amber-300 to-yellow-500 text-zinc-950 shadow-yellow-500/50' };
+      if (score >= 75) return { activeIndex: 4, grade: 'SS', color: 'from-yellow-400 to-amber-500 text-zinc-950 shadow-yellow-500/40' };
+      if (score >= 60) return { activeIndex: 3, grade: 'S', color: 'from-purple-400 to-indigo-500 text-white shadow-purple-500/40' };
+      if (score >= 45) return { activeIndex: 2, grade: 'A', color: 'from-cyan-400 to-blue-500 text-white shadow-cyan-500/40' };
+      if (score >= 25) return { activeIndex: 1, grade: 'B', color: 'from-emerald-400 to-teal-500 text-white shadow-emerald-500/30' };
+      return { activeIndex: 0, grade: 'C', color: 'from-zinc-500 to-zinc-700 text-zinc-200 shadow-zinc-700/30' };
+    } else if (mode === 'normal') {
+      // Normal Mode: Singer benchmark
+      if (score >= 92) return { activeIndex: 5, grade: 'SSS', color: 'from-amber-300 to-yellow-500 text-zinc-950 shadow-yellow-500/50' };
+      if (score >= 85) return { activeIndex: 4, grade: 'SS', color: 'from-yellow-400 to-amber-500 text-zinc-950 shadow-yellow-500/40' };
+      if (score >= 70) return { activeIndex: 3, grade: 'S', color: 'from-purple-400 to-indigo-500 text-white shadow-purple-500/40' };
+      if (score >= 50) return { activeIndex: 2, grade: 'A', color: 'from-cyan-400 to-blue-500 text-white shadow-cyan-500/40' };
+      if (score >= 30) return { activeIndex: 1, grade: 'B', color: 'from-emerald-400 to-teal-500 text-white shadow-emerald-500/30' };
+      return { activeIndex: 0, grade: 'C', color: 'from-zinc-500 to-zinc-700 text-zinc-200 shadow-zinc-700/30' };
+    } else {
+      // Hard Mode: Pro strict grading
+      if (score >= 96) return { activeIndex: 5, grade: 'SSS', color: 'from-amber-300 to-yellow-500 text-zinc-950 shadow-yellow-500/50' };
+      if (score >= 90) return { activeIndex: 4, grade: 'SS', color: 'from-yellow-400 to-amber-500 text-zinc-950 shadow-yellow-500/40' };
+      if (score >= 80) return { activeIndex: 3, grade: 'S', color: 'from-purple-400 to-indigo-500 text-white shadow-purple-500/40' };
+      if (score >= 65) return { activeIndex: 2, grade: 'A', color: 'from-cyan-400 to-blue-500 text-white shadow-cyan-500/40' };
+      if (score >= 45) return { activeIndex: 1, grade: 'B', color: 'from-emerald-400 to-teal-500 text-white shadow-emerald-500/30' };
+      return { activeIndex: 0, grade: 'C', color: 'from-zinc-500 to-zinc-700 text-zinc-200 shadow-zinc-700/30' };
+    }
   };
 
-  const gradeInfo = getGradeInfo(overallScore);
+  const gradeInfo = getGradeInfo(overallScore, difficulty);
 
   const getPitchComparison = () => {
     if (!isPlaying) {
@@ -87,33 +112,126 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
     const userHz = liveMicFrame.frequency_hz;
     const userNote = liveMicFrame.note_name;
 
-    const centsOffset = Math.round(1200 * Math.log2(userHz / targetHz));
-    const absOffset = Math.abs(centsOffset);
+    const rawCents = 1200 * Math.log2(userHz / targetHz);
+    const absRawCents = Math.abs(rawCents);
 
-    if (absOffset <= 20) {
-      return {
-        targetNote,
-        userNote,
-        statusText: 'PERFECT',
-        hitText: 'PERFECT',
-        colorClass: 'bg-emerald-500/20 border-emerald-500/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
-      };
-    } else if (absOffset <= 45) {
-      return {
-        targetNote,
-        userNote,
-        statusText: 'GREAT',
-        hitText: 'GREAT',
-        colorClass: 'bg-amber-500/20 border-amber-500/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
-      };
+    // Octave folding to distance within nearest octave harmonic
+    const octaveOffset = ((rawCents % 1200) + 1800) % 1200 - 600;
+    const foldedDiff = Math.abs(octaveOffset);
+
+    if (difficulty === 'easy') {
+      // Easy: Octave invariant (solves high metronome / instrumental harmonics)
+      if (foldedDiff <= 45) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'PERFECT',
+          hitText: 'PERFECT',
+          colorClass: 'bg-emerald-500/20 border-emerald-500/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
+        };
+      } else if (foldedDiff <= 85) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GREAT',
+          hitText: 'GREAT',
+          colorClass: 'bg-amber-500/20 border-amber-500/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
+        };
+      } else if (foldedDiff <= 130) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GOOD',
+          hitText: 'GOOD',
+          colorClass: 'bg-cyan-500/20 border-cyan-500/80 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.4)]',
+        };
+      } else {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'MISS (+0)',
+          hitText: 'MISS',
+          colorClass: 'bg-rose-500/20 border-rose-500/80 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
+        };
+      }
+    } else if (difficulty === 'normal') {
+      const cents = absRawCents <= 600 ? absRawCents : foldedDiff + 10;
+      if (cents <= 30) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'PERFECT',
+          hitText: 'PERFECT',
+          colorClass: 'bg-emerald-500/20 border-emerald-500/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
+        };
+      } else if (cents <= 60) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GREAT',
+          hitText: 'GREAT',
+          colorClass: 'bg-amber-500/20 border-amber-500/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
+        };
+      } else if (cents <= 90) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GOOD',
+          hitText: 'GOOD',
+          colorClass: 'bg-cyan-500/20 border-cyan-500/80 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.4)]',
+        };
+      } else {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'MISS (+0)',
+          hitText: 'MISS',
+          colorClass: 'bg-rose-500/20 border-rose-500/80 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
+        };
+      }
     } else {
-      return {
-        targetNote,
-        userNote,
-        statusText: 'MISS',
-        hitText: 'MISS',
-        colorClass: 'bg-rose-500/20 border-rose-500/80 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
-      };
+      // Hard: Strict octave
+      if (absRawCents <= 20) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'PERFECT',
+          hitText: 'PERFECT',
+          colorClass: 'bg-emerald-500/20 border-emerald-500/80 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)]',
+        };
+      } else if (absRawCents <= 40) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GREAT',
+          hitText: 'GREAT',
+          colorClass: 'bg-amber-500/20 border-amber-500/80 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.4)]',
+        };
+      } else if (absRawCents <= 65) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'GOOD',
+          hitText: 'GOOD',
+          colorClass: 'bg-cyan-500/20 border-cyan-500/80 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.4)]',
+        };
+      } else if (absRawCents <= 120) {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'NEAR (+1)',
+          hitText: 'NEAR',
+          colorClass: 'bg-yellow-500/20 border-yellow-500/80 text-yellow-300 shadow-[0_0_12px_rgba(234,179,8,0.4)]',
+        };
+      } else {
+        return {
+          targetNote,
+          userNote,
+          statusText: 'OFF (-3)',
+          hitText: 'OFF -3',
+          colorClass: 'bg-rose-500/20 border-rose-500/80 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.4)]',
+        };
+      }
     }
   };
 
@@ -124,13 +242,28 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
       {/* 1. WeSing Top Navigation & Score Progress Pill (Matching Image 2) */}
       <div className="w-full flex items-center justify-between gap-2 px-3 py-1.5 bg-zinc-950/75 backdrop-blur-md rounded-2xl border border-zinc-800/80 shadow-xl">
         
-        {/* Left: Back Button */}
-        <button
-          className="p-1.5 rounded-full hover:bg-white/10 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-          title="Back"
-        >
-          <ArrowLeft size={18} />
-        </button>
+        {/* Left: 3-Mode Difficulty Selector [ Easy | Normal | Hard ] */}
+        <div className="flex items-center bg-zinc-900/90 border border-zinc-800 rounded-full p-0.5 shrink-0 shadow-inner">
+          {(['easy', 'normal', 'hard'] as ScoreDifficulty[]).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => onDifficultyChange?.(mode)}
+              className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold capitalize transition-all cursor-pointer ${
+                difficulty === mode
+                  ? mode === 'easy'
+                    ? 'bg-emerald-500 text-zinc-950 shadow-sm shadow-emerald-500/50'
+                    : mode === 'normal'
+                    ? 'bg-amber-400 text-zinc-950 shadow-sm shadow-amber-400/50'
+                    : 'bg-rose-500 text-white shadow-sm shadow-rose-500/50'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+              }`}
+              title={`ระดับ ${mode === 'easy' ? 'Easy (ง่าย/มือใหม่/เพลงรวมดนตรี)' : mode === 'normal' ? 'Normal (ปานกลาง/นักร้อง)' : 'Hard (ยาก/หักแต้ม Miss)'}`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
 
         {/* Center: Score Track Header with Grade Milestones C B A S SS SSS */}
         <div className="flex-1 max-w-md mx-auto flex items-center bg-zinc-900/90 border border-zinc-800 rounded-full px-3 py-1 gap-2 shadow-inner">
@@ -139,7 +272,7 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
           <div className="flex items-center gap-1.5 bg-gradient-to-r from-amber-400 to-yellow-500 text-zinc-950 font-black text-xs px-3 py-1 rounded-full shadow-md shrink-0 min-w-[72px] justify-center">
             <Music size={12} className="fill-zinc-950 shrink-0" />
             <span className="font-mono font-black text-xs leading-none whitespace-nowrap">
-              {Math.round(overallScore * 8.5)}
+              {rawScore !== undefined ? rawScore.toLocaleString() : Math.round(overallScore * 8.5)}
             </span>
           </div>
 

@@ -7,7 +7,7 @@ import type { SplitCompletePayload, StemModel } from '../types/splitter';
  */
 export async function splitAudioStemsNative(
   inputPath: string,
-  model: StemModel = 'mdx_extra_q',
+  model: StemModel = 'htdemucs',
   jobId?: string,
 ): Promise<SplitCompletePayload> {
   return invoke<SplitCompletePayload>('split_audio_stems', {

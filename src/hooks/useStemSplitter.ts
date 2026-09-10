@@ -16,6 +16,8 @@ import {
 // ────────────────────────────────────────────────────────────────
 
 export interface UseStemSplitterOptions {
+  /** Called when both stems are ready (recommended for sequential loading) */
+  onComplete?: (vocalPath: string, instrumentalPath: string, jobId: string) => void;
   /** Called when vocal stem is ready — provides the absolute file path */
   onVocalReady?: (filePath: string, jobId: string) => void;
   /** Called when instrumental stem is ready */
@@ -68,8 +70,11 @@ export function useStemSplitter(options: UseStemSplitterOptions = {}) {
           instrumentalPath: payload.instrumental_path,
         }));
 
-        optionsRef.current.onVocalReady?.(payload.vocal_path, payload.job_id);
-        optionsRef.current.onInstrumentalReady?.(payload.instrumental_path, payload.job_id);
+        optionsRef.current.onComplete?.(payload.vocal_path, payload.instrumental_path, payload.job_id);
+        if (!optionsRef.current.onComplete) {
+          optionsRef.current.onVocalReady?.(payload.vocal_path, payload.job_id);
+          optionsRef.current.onInstrumentalReady?.(payload.instrumental_path, payload.job_id);
+        }
         currentJobIdRef.current = null;
       };
 
@@ -129,7 +134,7 @@ export function useStemSplitter(options: UseStemSplitterOptions = {}) {
 
   // ── startSplit ─────────────────────────────────────────────────
   const startSplit = useCallback(
-    async (inputPath: string, model: StemModel = 'mdx_extra_q') => {
+    async (inputPath: string, model: StemModel = 'htdemucs') => {
       if (state.status === 'loading_model' || state.status === 'separating') {
         console.warn('[useStemSplitter] A split is already in progress.');
         return;

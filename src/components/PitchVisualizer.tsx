@@ -32,6 +32,8 @@ interface Particle {
 }
 
 const SCALE_NOTES = [
+  { name: 'A5', hz: 880.0 },
+  { name: 'E5', hz: 659.25 },
   { name: 'C5', hz: 523.25 },
   { name: 'A4', hz: 440.0 },
   { name: 'F4', hz: 349.23 },
@@ -60,6 +62,24 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
   const visibleDuration = Math.max(3.0, Math.min(12.0, 7.0 / zoomLevel));
   const startTimeSec = Math.max(0, currentTimeSec - visibleDuration * 0.25);
   const isDraggingRef = useRef<boolean>(false);
+
+  // Dynamic responsive container size
+  const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 800, height: 360 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+      }
+    };
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Live pitch trail history
   const livePitchHistoryRef = useRef<{ timeSec: number; hz: number; color: string }[]>([]);
@@ -144,11 +164,16 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       const currentT = currentTimeSecRef.current;
       const currentTrack = vocalRefTrackRef.current;
       let targetHz = 0;
-      if (currentTrack?.analysis?.pitch_frames) {
+      if (currentTrack?.analysis?.pitch_frames && currentTrack.analysis.pitch_frames.length > 0) {
         const frames = currentTrack.analysis.pitch_frames;
-        const frameIdx = Math.floor((currentT * 1000) / 10);
-        if (frameIdx >= 0 && frameIdx < frames.length && frames[frameIdx].is_voiced) {
-          targetHz = getTransposedHz(frames[frameIdx].frequency_hz);
+        const timeMs = currentT * 1000;
+        const firstTime = frames[0].timestamp_ms;
+        const lastTime = frames[frames.length - 1].timestamp_ms;
+        const avgHop = (lastTime - firstTime) / Math.max(1, frames.length - 1);
+        let estIdx = Math.round((timeMs - firstTime) / (avgHop || 25));
+        estIdx = Math.max(0, Math.min(frames.length - 1, estIdx));
+        if (frames[estIdx] && frames[estIdx].is_voiced) {
+          targetHz = getTransposedHz(frames[estIdx].frequency_hz);
         }
       }
 
@@ -207,19 +232,18 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const wrapper = canvas.parentElement;
-    const width = wrapper ? wrapper.getBoundingClientRect().width : 800;
-    const height = 360;
+    const width = containerSize.width;
+    const height = Math.max(120, containerSize.height);
 
     if (
       Math.abs(lastSizeRef.current.width - width) > 1 ||
-      lastSizeRef.current.height !== height ||
+      Math.abs(lastSizeRef.current.height - height) > 1 ||
       lastSizeRef.current.dpr !== dpr
     ) {
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = '100%';
-      canvas.style.height = `${height}px`;
+      canvas.style.height = '100%';
       ctx.scale(dpr, dpr);
       lastSizeRef.current = { width, height, dpr };
     } else {
@@ -234,18 +258,18 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, width, height);
 
-    // Dynamic Pitch Bounds
-    const minHz = 80;
-    const maxHz = 600;
+    // Dynamic Pitch Bounds: Shift A2 down close to bottom border and expand headroom up to A5
+    const minHz = 100;
+    const maxHz = 950;
     const logMin = Math.log2(minHz);
     const logMax = Math.log2(maxHz);
 
     const hzToY = (hz: number) => {
-      if (hz <= minHz) return height - 30;
-      if (hz >= maxHz) return 30;
+      if (hz <= minHz) return height - 16;
+      if (hz >= maxHz) return 16;
       const logHz = Math.log2(hz);
       const norm = (logHz - logMin) / (logMax - logMin);
-      return height - 30 - norm * (height - 60);
+      return height - 16 - norm * (height - 32);
     };
 
     const timeToX = (tSec: number) => {
@@ -259,7 +283,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
 
     SCALE_NOTES.forEach((note) => {
       const y = hzToY(note.hz);
-      if (y >= 20 && y <= height - 20) {
+      if (y >= 14 && y <= height - 12) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -268,7 +292,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        ctx.fillStyle = note.name.includes('C') || note.name.includes('A') ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.2)';
+        ctx.fillStyle = note.name.includes('C') || note.name.includes('A') ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)';
         ctx.fillText(note.name, 12, y);
       }
     });
@@ -380,9 +404,15 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       let activeY = height / 2;
       if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
         activeY = hzToY(liveMicFrame.frequency_hz);
-      } else if (vocalRefTrack?.analysis?.pitch_frames) {
-        const frameIdx = Math.floor((currentTimeSec * 1000) / 10);
-        const targetFrame = vocalRefTrack.analysis.pitch_frames[frameIdx];
+      } else if (vocalRefTrack?.analysis?.pitch_frames && vocalRefTrack.analysis.pitch_frames.length > 0) {
+        const frames = vocalRefTrack.analysis.pitch_frames;
+        const timeMs = currentTimeSec * 1000;
+        const firstTime = frames[0].timestamp_ms;
+        const lastTime = frames[frames.length - 1].timestamp_ms;
+        const avgHop = (lastTime - firstTime) / Math.max(1, frames.length - 1);
+        let estIdx = Math.round((timeMs - firstTime) / (avgHop || 25));
+        estIdx = Math.max(0, Math.min(frames.length - 1, estIdx));
+        const targetFrame = frames[estIdx];
         if (targetFrame && targetFrame.is_voiced) {
           activeY = hzToY(getTransposedHz(targetFrame.frequency_hz));
         }
@@ -435,6 +465,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     transposeKey,
     bpm,
     isPlaying,
+    containerSize,
   ]);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
