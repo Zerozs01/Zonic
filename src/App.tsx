@@ -93,7 +93,12 @@ export default function App() {
   // Key Transpose, Speed Rate & Metronome BPM State
   const [transposeKey, setTransposeKey] = useState<number>(0); // -6 to +6 semitones
   const [playbackRate, setPlaybackRate] = useState<number>(1.0); // 0.5x to 1.5x
+  const playbackRateRef = useRef<number>(playbackRate);
+  playbackRateRef.current = playbackRate;
   const [bpm, setBpm] = useState<number>(120);
+
+  // Cache for analyzed pitch results to prevent redundant heavy re-analysis
+  const pitchCacheRef = useRef<Map<string, any>>(new Map());
 
   // Audio Context for Backing & Guide Audio Playback
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -196,26 +201,8 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isRecording, isPlaying, isSettingsOpen]);
 
-  // Update Transpose, Playback Rate and Gain dynamically on active audio sources
+  // 1. Dynamic Gain update for Vocal & Instrumental (Does NOT touch playback timebase)
   useEffect(() => {
-    if (isPlaying && audioCtxRef.current) {
-      // Re-anchor playback timer offset so dynamic speed change doesn't jump the playhead
-      const ctx = audioCtxRef.current;
-      playbackStartOffsetRef.current = currentTimeSecRef.current;
-      playbackStartTimeRef.current = ctx.currentTime;
-    }
-    if (instSourceRef.current) {
-      try {
-        instSourceRef.current.playbackRate.value = playbackRate;
-        instSourceRef.current.detune.value = transposeKey * 100;
-      } catch (e) {}
-    }
-    if (vocalRefSourceRef.current) {
-      try {
-        vocalRefSourceRef.current.playbackRate.value = playbackRate;
-        vocalRefSourceRef.current.detune.value = transposeKey * 100;
-      } catch (e) {}
-    }
     if (vocalGainNodeRef.current) {
       try {
         vocalGainNodeRef.current.gain.value = vocalVolume * volume;
@@ -226,7 +213,42 @@ export default function App() {
         instGainNodeRef.current.gain.value = instVolume * volume;
       } catch (e) {}
     }
-  }, [playbackRate, transposeKey, vocalVolume, instVolume, volume, isPlaying]);
+  }, [vocalVolume, instVolume, volume]);
+
+  // 2. Dynamic Playback Rate and Transpose (Sample-accurate & re-anchors playback timer seamlessly)
+  useEffect(() => {
+    playbackRateRef.current = playbackRate;
+    if (isPlaying && audioCtxRef.current) {
+      const ctx = audioCtxRef.current;
+      const now = ctx.currentTime;
+      // Re-anchor playback timer offset with sample-accurate current time
+      playbackStartOffsetRef.current = currentTimeSecRef.current;
+      playbackStartTimeRef.current = now;
+
+      if (instSourceRef.current) {
+        try {
+          instSourceRef.current.playbackRate.setValueAtTime(playbackRate, now);
+          instSourceRef.current.detune.setValueAtTime(transposeKey * 100, now);
+        } catch (e) {
+          try {
+            instSourceRef.current.playbackRate.value = playbackRate;
+            instSourceRef.current.detune.value = transposeKey * 100;
+          } catch (_) {}
+        }
+      }
+      if (vocalRefSourceRef.current) {
+        try {
+          vocalRefSourceRef.current.playbackRate.setValueAtTime(playbackRate, now);
+          vocalRefSourceRef.current.detune.setValueAtTime(transposeKey * 100, now);
+        } catch (e) {
+          try {
+            vocalRefSourceRef.current.playbackRate.value = playbackRate;
+            vocalRefSourceRef.current.detune.value = transposeKey * 100;
+          } catch (_) {}
+        }
+      }
+    }
+  }, [playbackRate, transposeKey, isPlaying]);
 
   // Auto Load Track from Downloader
   const handleAutoLoadDownloadedTrack = useCallback(
@@ -244,18 +266,20 @@ export default function App() {
         let analysis: any = null;
 
         if (isTauri) {
-          let arrayBuffer: ArrayBuffer | null = await readAudioFileBytesNative(filePath);
-          if (!arrayBuffer) {
-            try {
-              const { convertFileSrc } = await import('@tauri-apps/api/core');
-              const assetUrl = convertFileSrc(filePath);
-              const res = await fetch(assetUrl);
-              if (res.ok) {
-                arrayBuffer = await res.arrayBuffer();
-              }
-            } catch (e) {
-              console.warn('Asset fetch fallback failed:', e);
+          let arrayBuffer: ArrayBuffer | null = null;
+          try {
+            const { convertFileSrc } = await import('@tauri-apps/api/core');
+            const assetUrl = convertFileSrc(filePath);
+            const res = await fetch(assetUrl);
+            if (res.ok) {
+              arrayBuffer = await res.arrayBuffer();
             }
+          } catch (e) {
+            console.warn('Asset fetch fallback to native read:', e);
+          }
+
+          if (!arrayBuffer) {
+            arrayBuffer = await readAudioFileBytesNative(filePath);
           }
 
           if (!arrayBuffer) {
@@ -273,15 +297,25 @@ export default function App() {
 
           let nativeAnalysis: any = null;
           if (targetTrackId === 'vocalRef') {
-            try {
-              nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
-            } catch (pitchErr) {
-              console.warn('[App] Native pitch analysis warning, falling back to AudioBuffer:', pitchErr);
+            if (pitchCacheRef.current.has(filePath)) {
+              nativeAnalysis = pitchCacheRef.current.get(filePath);
+            } else {
+              try {
+                nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
+                if (nativeAnalysis) {
+                  pitchCacheRef.current.set(filePath, nativeAnalysis);
+                }
+              } catch (pitchErr) {
+                console.warn('[App] Native pitch analysis warning, falling back to AudioBuffer:', pitchErr);
+              }
             }
             if (!nativeAnalysis?.pitch_frames || nativeAnalysis.pitch_frames.length === 0) {
               if (audioBuffer.duration <= 90) {
                 try {
                   nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
+                  if (nativeAnalysis) {
+                    pitchCacheRef.current.set(filePath, nativeAnalysis);
+                  }
                 } catch (webAudioErr) {
                   console.warn('[App] AudioBuffer pitch analysis warning:', webAudioErr);
                 }
@@ -400,10 +434,19 @@ export default function App() {
         // 1. Refresh Downloader Library immediately so both separated stems appear in Library tab
         await refreshDownloadedLibrary();
 
-        // 2. Sequentially load tracks to prevent concurrency locks
+        // 2. Preserve active video URL so visual preview does not disappear
+        const preservedVideoUrl = currentVideoUrl;
+
+        // 3. Sequentially load tracks to prevent concurrency locks
         const sourceName = vocalRefTrack?.name ?? instrumentalTrack?.name ?? 'track';
         await handleAutoLoadDownloadedTrack('instrumental', instrumentalPath, `Instrumental — ${sourceName}`);
         await handleAutoLoadDownloadedTrack('vocalRef', vocalPath, `Vocals — ${sourceName}`);
+
+        // 4. Re-apply preserved video URL if it was active
+        if (preservedVideoUrl) {
+          setCleanVideoUrl(preservedVideoUrl);
+          setViewMode('video');
+        }
 
         setStatusMsg(`แยกเสียงสำเร็จและบันทึกลงในคลังเพลงแล้ว: '${sourceName}'`);
       } catch (err: any) {
@@ -465,16 +508,26 @@ export default function App() {
           // 2. Only perform YIN pitch analysis on Vocal Reference tracks
           let nativeAnalysis: any = null;
           if (trackType === 'vocalRef') {
-            setStatusMsg(`กำลังวิเคราะห์ Pitch เสียงร้องด้วย Native Rust DSP...`);
-            try {
-              nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
-            } catch (e) {
-              console.warn('[App] Pitch analysis warning, falling back to AudioBuffer:', e);
+            if (pitchCacheRef.current.has(filePath)) {
+              nativeAnalysis = pitchCacheRef.current.get(filePath);
+            } else {
+              setStatusMsg(`กำลังวิเคราะห์ Pitch เสียงร้องด้วย Native Rust DSP...`);
+              try {
+                nativeAnalysis = await analyzeAudioFilePitchNative(filePath);
+                if (nativeAnalysis) {
+                  pitchCacheRef.current.set(filePath, nativeAnalysis);
+                }
+              } catch (e) {
+                console.warn('[App] Pitch analysis warning, falling back to AudioBuffer:', e);
+              }
             }
             if (!nativeAnalysis?.pitch_frames || nativeAnalysis.pitch_frames.length === 0) {
               setStatusMsg(`กำลังวิเคราะห์ Pitch เสียงร้องจาก AudioBuffer...`);
               try {
                 nativeAnalysis = extractPitchFramesFromAudioBuffer(audioBuffer);
+                if (nativeAnalysis) {
+                  pitchCacheRef.current.set(filePath, nativeAnalysis);
+                }
               } catch (audioBufErr) {
                 console.warn('[App] AudioBuffer pitch analysis warning:', audioBufErr);
               }
@@ -673,17 +726,19 @@ export default function App() {
         resetScore();
       }
 
+      const scheduleTime = ctx.currentTime + 0.03;
+
       // Play Instrumental Track
       if (instrumentalTrack?.audioBuffer) {
         const iSource = ctx.createBufferSource();
         iSource.buffer = instrumentalTrack.audioBuffer;
-        iSource.playbackRate.value = playbackRate;
+        iSource.playbackRate.value = playbackRateRef.current;
         iSource.detune.value = transposeKey * 100;
         const gainNode = ctx.createGain();
         gainNode.gain.value = instVolume * volume;
         iSource.connect(gainNode);
         gainNode.connect(ctx.destination);
-        iSource.start(0, startAtSec);
+        iSource.start(scheduleTime, startAtSec);
         instSourceRef.current = iSource;
         instGainNodeRef.current = gainNode;
       }
@@ -692,26 +747,27 @@ export default function App() {
       if (vocalRefTrack?.audioBuffer) {
         const vSource = ctx.createBufferSource();
         vSource.buffer = vocalRefTrack.audioBuffer;
-        vSource.playbackRate.value = playbackRate;
+        vSource.playbackRate.value = playbackRateRef.current;
         vSource.detune.value = transposeKey * 100;
         const gainNode = ctx.createGain();
         gainNode.gain.value = vocalVolume * volume;
         vSource.connect(gainNode);
         gainNode.connect(ctx.destination);
-        vSource.start(0, startAtSec);
+        vSource.start(scheduleTime, startAtSec);
         vocalRefSourceRef.current = vSource;
         vocalGainNodeRef.current = gainNode;
       }
 
       isPlayingRef.current = true;
       setIsPlaying(true);
-      playbackStartTimeRef.current = ctx.currentTime;
+      playbackStartTimeRef.current = scheduleTime;
       playbackStartOffsetRef.current = startAtSec;
 
       let lastUiUpdate = 0;
       const updateTimer = () => {
         if (!isPlayingRef.current) return;
-        const elapsed = (ctx.currentTime - playbackStartTimeRef.current) * playbackRate;
+        const currentRate = playbackRateRef.current;
+        const elapsed = (ctx.currentTime - playbackStartTimeRef.current) * currentRate;
         const current = playbackStartOffsetRef.current + elapsed;
 
         if (current >= maxDuration) {
@@ -720,12 +776,12 @@ export default function App() {
           setCurrentTimeSec(0);
           setIsResultsOpen(true);
         } else {
-          currentTimeSecRef.current = current;
+          currentTimeSecRef.current = Math.max(0, current);
           const now = performance.now();
           // Throttle state update to ~25 FPS to save CPU, while ref stays 60 FPS
           if (now - lastUiUpdate >= 40) {
             lastUiUpdate = now;
-            setCurrentTimeSec(current);
+            setCurrentTimeSec(Math.max(0, current));
           }
           if (isPlayingRef.current) {
             playbackAnimRef.current = requestAnimationFrame(updateTimer);
@@ -825,6 +881,27 @@ export default function App() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDraggingSplitter]);
+
+  // Dedicated handler to attach video only from library without replacing audio stems
+  const handleAttachVideoOnly = useCallback(
+    async (filePath: string, fileName: string) => {
+      try {
+        let vUrl: string | null = null;
+        if (isTauriAvailable()) {
+          const { convertFileSrc } = await import('@tauri-apps/api/core');
+          vUrl = convertFileSrc(filePath);
+        }
+        if (vUrl) {
+          setCleanVideoUrl(vUrl);
+          setViewMode('video');
+          setStatusMsg(`เชื่อมต่อภาพวิดีโอสำเร็จ: '${fileName}' (คงเสียงดนตรีและระบบคะแนนเดิม)`);
+        }
+      } catch (err: any) {
+        console.warn('[App] Failed to attach video only:', err);
+      }
+    },
+    [setCleanVideoUrl, setViewMode]
+  );
 
   // Lyric Lines State
   const [lyricLines, setLyricLines] = useState<LyricLine[]>([]);
@@ -986,6 +1063,7 @@ export default function App() {
         onRetryTask={retryTask}
         onClearFinished={clearFinished}
         onAssignTrack={(trackType, filePath, title) => handleAutoLoadDownloadedTrack(trackType, filePath, title)}
+        onAttachVideoOnly={handleAttachVideoOnly}
         onSendToSplitter={(filePath) => {
           setIsDownloaderOpen(false);
           setIsSplitterOpen(true);

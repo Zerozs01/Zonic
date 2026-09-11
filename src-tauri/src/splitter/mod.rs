@@ -405,10 +405,16 @@ pub async fn split_audio_stems(
         let lib_vocal = download_dir.join(format!("[Vocals] {}.wav", sanitized));
         let lib_inst = download_dir.join(format!("[Instrumental] {}.wav", sanitized));
 
-        if std::fs::copy(&raw_vocal, &lib_vocal).is_ok() {
+        // Offload heavy WAV file copying (40MB-100MB+) to blocking threadpool to keep async loop responsive
+        let raw_v = raw_vocal.clone();
+        let lib_v = lib_vocal.clone();
+        if let Ok(Ok(_)) = tokio::task::spawn_blocking(move || std::fs::copy(raw_v, lib_v)).await {
             final_vocal = lib_vocal.to_string_lossy().to_string();
         }
-        if std::fs::copy(&raw_inst, &lib_inst).is_ok() {
+
+        let raw_i = raw_inst.clone();
+        let lib_i = lib_inst.clone();
+        if let Ok(Ok(_)) = tokio::task::spawn_blocking(move || std::fs::copy(raw_i, lib_i)).await {
             final_inst = lib_inst.to_string_lossy().to_string();
         }
     }

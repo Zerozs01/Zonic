@@ -14,6 +14,7 @@ pub struct AudioState {
     pub recorder: Arc<Mutex<AudioRecorder>>,
     pub track_gains: Arc<Mutex<HashMap<String, f32>>>,
     pub track_mutes: Arc<Mutex<HashMap<String, bool>>>,
+    pub live_yin_detector: Arc<Mutex<crate::dsp::pitch::YinDetector>>,
 }
 
 impl AudioState {
@@ -26,10 +27,19 @@ impl AudioState {
         mutes.insert("vocalRef".to_string(), false);
         mutes.insert("instrumental".to_string(), false);
 
+        let default_yin_config = crate::dsp::pitch::YinConfig {
+            sample_rate: 44100,
+            window_size: 2048,
+            threshold: 0.15,
+            min_freq_hz: 60.0,
+            max_freq_hz: 1200.0,
+        };
+
         Self {
             recorder: Arc::new(Mutex::new(AudioRecorder::new())),
             track_gains: Arc::new(Mutex::new(gains)),
             track_mutes: Arc::new(Mutex::new(mutes)),
+            live_yin_detector: Arc::new(Mutex::new(crate::dsp::pitch::YinDetector::new(default_yin_config))),
         }
     }
 }

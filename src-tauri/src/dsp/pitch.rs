@@ -46,6 +46,12 @@ impl YinDetector {
         }
     }
 
+    pub fn update_sample_rate(&mut self, sample_rate: u32) {
+        if sample_rate > 0 {
+            self.config.sample_rate = sample_rate;
+        }
+    }
+
     pub fn detect_pitch(&mut self, samples: &[f32], timestamp_ms: f64) -> PitchFrame {
         let window_size = self.config.window_size;
         if samples.len() < window_size {

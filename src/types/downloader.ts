@@ -61,3 +61,14 @@ export interface DownloadedFileInfo {
   duration_secs?: number;
 }
 
+export interface LibraryFolder {
+  id: string;
+  name: string;
+  description?: string;
+  rating: number; // 0 - 5 stars
+  tags: string[]; // e.g. ['exercise', 'artist', 'scales']
+  filePaths: string[]; // list of file_path assigned to this folder
+  createdAt: number;
+  updatedAt: number;
+}
+

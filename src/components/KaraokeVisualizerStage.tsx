@@ -3,7 +3,7 @@ import { PitchVisualizer } from './PitchVisualizer';
 import { KaraokeHUD } from './KaraokeHUD';
 import { LoadedTrack, PitchFrame, ScoreDifficulty } from '../types/audio';
 import { LyricLine } from '../utils/audioAnalysis';
-import { Video, Activity, UploadCloud, Film, Layers } from 'lucide-react';
+import { UploadCloud, Film } from 'lucide-react';
 import { StageViewMode } from '../hooks/useVideoSync';
 
 interface KaraokeVisualizerStageProps {
@@ -158,7 +158,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
     }
   }, [currentTimeSec, isPlaying, playbackRate, videoUrl]);
 
-  // 2. Play / Pause Controller with Master Audio Engine
+  // 2. Play / Pause Controller with Master Audio Engine (Independent of playbackRate changes)
   useEffect(() => {
     const video = videoRef.current;
     if (!video || !videoUrl) return;
@@ -200,7 +200,14 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
         video.currentTime = currentTimeSecRef.current;
       }
     }
-  }, [isPlaying, playbackRate, videoUrl]);
+  }, [isPlaying, videoUrl]);
+
+  // 2.1 Dynamic Playback Rate change for video (Smooth without re-triggering play or seeking)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !videoUrl) return;
+    video.playbackRate = playbackRate;
+  }, [playbackRate, videoUrl]);
 
   // 3. Smooth Phase-Locked Loop (PLL) Drift Correction (Interval-based: 350ms, NO rapid hook thrashing)
   useEffect(() => {
@@ -219,7 +226,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
 
       // Zone 0: Imperceptible drift (<= 50ms) -> keep normal playbackRate
       if (absDrift <= 0.05) {
-        if (video.playbackRate !== playbackRate) {
+        if (Math.abs(video.playbackRate - playbackRate) > 0.005) {
           video.playbackRate = playbackRate;
         }
         return;
@@ -309,70 +316,23 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
       {/* Viewport Stage Container */}
       <div className="w-full h-full relative flex flex-col justify-between overflow-hidden bg-gradient-to-b from-[#13102d] via-[#1a153a] to-[#090715]">
         
-        {/* WeSing Top Score HUD Bar Overlay */}
-        <div className="absolute top-3 left-3 right-3 z-30 pointer-events-none flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <KaraokeHUD
-              targetPitchFrame={targetPitchFrame}
-              liveMicFrame={liveMicFrame}
-              isRecording={isRecording}
-              overallScore={overallScore}
-              rawScore={rawScore}
-              transposeKey={transposeKey}
-              currentTimeSec={currentTimeSec}
-              durationSec={durationSec}
-              isPlaying={isPlaying}
-              difficulty={difficulty}
-              onDifficultyChange={onDifficultyChange}
-            />
-          </div>
-
-          {/* 3-Way Mode Segmented Control: [ Video | Score | Hybrid ] */}
-          {onViewModeChange && (
-            <div className="pointer-events-auto ml-2 shrink-0 flex items-center bg-zinc-950/85 border border-zinc-700/80 rounded-xl p-0.5 shadow-lg backdrop-blur-md">
-              <button
-                type="button"
-                onClick={() => onViewModeChange('video')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'video'
-                    ? 'bg-cyan-600 text-white shadow-md shadow-cyan-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
-                }`}
-                title="โหมดวิดีโอเต็มจอ (Video 100%)"
-              >
-                <Video size={12} />
-                <span>Video</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onViewModeChange('stage')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'stage'
-                    ? 'bg-purple-600 text-white shadow-md shadow-purple-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
-                }`}
-                title="โหมดกราฟคะแนนเต็มจอ (Score 100%)"
-              >
-                <Activity size={12} />
-                <span>Score</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onViewModeChange('hybrid')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  viewMode === 'hybrid'
-                    ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/30 font-extrabold'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
-                }`}
-                title="โหมดผสม: วิดีโอ 70% + กราฟคะแนน 30% (Hybrid 70/30)"
-              >
-                <Layers size={12} />
-                <span>Hybrid</span>
-              </button>
-            </div>
-          )}
+        {/* WeSing Top Score HUD Bar Overlay with integrated Mode Selector on the exact same row */}
+        <div className="absolute top-3 left-3 right-3 z-30 pointer-events-none">
+          <KaraokeHUD
+            targetPitchFrame={targetPitchFrame}
+            liveMicFrame={liveMicFrame}
+            isRecording={isRecording}
+            overallScore={overallScore}
+            rawScore={rawScore}
+            transposeKey={transposeKey}
+            currentTimeSec={currentTimeSec}
+            durationSec={durationSec}
+            isPlaying={isPlaying}
+            difficulty={difficulty}
+            onDifficultyChange={onDifficultyChange}
+            viewMode={viewMode}
+            onViewModeChange={onViewModeChange}
+          />
         </div>
 
         {/* ── Viewport Display (Supports 'stage', 'video', and 'hybrid' seamlessly) ── */}
@@ -463,6 +423,7 @@ export const KaraokeVisualizerStage: React.FC<KaraokeVisualizerStageProps> = Rea
               transposeKey={transposeKey}
               bpm={bpm}
               isPlaying={isPlaying}
+              targetPitchFrame={targetPitchFrame}
             />
           </div>
         </div>

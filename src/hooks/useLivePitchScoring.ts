@@ -36,12 +36,36 @@ export function useLivePitchScoring({
     return Math.max(100, voicedCount * 10);
   }, [vocalRefTrack]);
 
+  const lastUiUpdateRef = useRef<number>(0);
+
+  // Helper to commit score to UI with throttle (~10 FPS / 100ms) to prevent cascading App re-renders
+  const flushScoreToUi = useCallback(
+    (raw: number, forced: boolean = false) => {
+      const now = performance.now();
+      if (forced || now - lastUiUpdateRef.current >= 100) {
+        lastUiUpdateRef.current = now;
+        setRawScore(raw);
+        const newOverall = Math.min(100, Math.round((raw / maxScore) * 100));
+        setOverallScore(newOverall);
+      }
+    },
+    [maxScore]
+  );
+
   const resetScore = useCallback(() => {
     scoredFramesRef.current.clear();
     accumulatedScoreRef.current = 0;
+    lastUiUpdateRef.current = 0;
     setRawScore(0);
     setOverallScore(0);
   }, []);
+
+  // Flush exact final score when playback stops
+  useEffect(() => {
+    if (!isPlaying && accumulatedScoreRef.current > 0) {
+      flushScoreToUi(accumulatedScoreRef.current, true);
+    }
+  }, [isPlaying, flushScoreToUi]);
 
   // Reset score when loaded vocal track or difficulty changes
   useEffect(() => {
@@ -164,33 +188,24 @@ export function useLivePitchScoring({
       pts = 0; // Unvoiced / natural breath (never penalize breath gaps)
     }
 
+    let pointDelta = 0;
     if (existingPts === undefined) {
       // First encounter of this target frame
-      scoredFramesRef.current.set(frameTime, pts);
-      const nextAcc = Math.max(0, accumulatedScoreRef.current + pts);
-      accumulatedScoreRef.current = nextAcc;
-      setRawScore(nextAcc);
-      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
-      setOverallScore(newOverall);
+      pointDelta = pts;
     } else if (pts > existingPts) {
-      // Practicing / rewound: user improved their hit! Add the score difference
-      const diff = pts - existingPts;
-      scoredFramesRef.current.set(frameTime, pts);
-      const nextAcc = Math.max(0, accumulatedScoreRef.current + diff);
-      accumulatedScoreRef.current = nextAcc;
-      setRawScore(nextAcc);
-      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
-      setOverallScore(newOverall);
+      // Practicing / rewound: user improved their hit!
+      pointDelta = pts - existingPts;
     } else if (difficulty === 'hard' && pts < 0 && existingPts >= 0) {
       // Hard mode: re-singing a frame badly penalizes
-      const diff = pts - existingPts;
-      scoredFramesRef.current.set(frameTime, pts);
-      const nextAcc = Math.max(0, accumulatedScoreRef.current + diff);
-      accumulatedScoreRef.current = nextAcc;
-      setRawScore(nextAcc);
-      const newOverall = Math.min(100, Math.round((nextAcc / maxScore) * 100));
-      setOverallScore(newOverall);
+      pointDelta = pts - existingPts;
+    } else {
+      return;
     }
+
+    scoredFramesRef.current.set(frameTime, pts);
+    const nextAcc = Math.max(0, accumulatedScoreRef.current + pointDelta);
+    accumulatedScoreRef.current = nextAcc;
+    flushScoreToUi(nextAcc, false);
   }, [
     isPlaying,
     isRecording,
@@ -199,6 +214,7 @@ export function useLivePitchScoring({
     transposeKey,
     maxScore,
     difficulty,
+    flushScoreToUi,
   ]);
 
   return {

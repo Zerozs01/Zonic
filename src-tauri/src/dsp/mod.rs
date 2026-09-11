@@ -3,7 +3,7 @@ pub mod analyzer;
 pub mod filter;
 
 use analyzer::{analyze_pcm_buffer, AnalysisResult};
-use pitch::{YinConfig, YinDetector, PitchFrame};
+use pitch::PitchFrame;
 use crate::audio::file_loader::read_audio_file;
 use crate::audio::AudioState;
 
@@ -23,9 +23,13 @@ pub fn analyze_live_stream_pitch(
     state: tauri::State<'_, AudioState>,
     max_samples: Option<usize>,
 ) -> Result<PitchFrame, String> {
-    let recorder = state.recorder.lock();
-    let samples = recorder.get_buffered_samples(max_samples.unwrap_or(2048));
-    let status = recorder.status();
+    // Release recorder lock immediately after fetching samples to prevent blocking audio thread
+    let (samples, status) = {
+        let recorder = state.recorder.lock();
+        let samples = recorder.get_buffered_samples(max_samples.unwrap_or(2048));
+        let status = recorder.status();
+        (samples, status)
+    };
 
     if samples.len() < 2048 {
         return Ok(PitchFrame {
@@ -40,15 +44,8 @@ pub fn analyze_live_stream_pitch(
     }
 
     let window = &samples[samples.len() - 2048..];
-    let config = YinConfig {
-        sample_rate: status.sample_rate,
-        window_size: 2048,
-        threshold: 0.15,
-        min_freq_hz: 60.0,
-        max_freq_hz: 1200.0,
-    };
-
-    let mut detector = YinDetector::new(config);
+    let mut detector = state.live_yin_detector.lock();
+    detector.update_sample_rate(status.sample_rate);
     let frame = detector.detect_pitch(window, 0.0);
     Ok(frame)
 }

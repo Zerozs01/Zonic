@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreVertical, Music, Mic, Zap, Music2 } from 'lucide-react';
+import { MoreVertical, Music, Mic, Zap, Music2, Video, Activity, Layers } from 'lucide-react';
 import { PitchFrame, ScoreDifficulty } from '../types/audio';
 import { hzToNote } from '../utils/webAudioPitch';
 
@@ -15,6 +15,8 @@ interface KaraokeHUDProps {
   isPlaying?: boolean;
   difficulty?: ScoreDifficulty;
   onDifficultyChange?: (mode: ScoreDifficulty) => void;
+  viewMode?: 'stage' | 'video' | 'hybrid';
+  onViewModeChange?: (mode: 'stage' | 'video' | 'hybrid') => void;
 }
 
 const GRADES = ['C', 'B', 'A', 'S', 'SS', 'SSS'];
@@ -31,6 +33,8 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
   isPlaying = false,
   difficulty = 'easy',
   onDifficultyChange,
+  viewMode,
+  onViewModeChange,
 }) => {
   const formatTime = (sec: number) => {
     if (isNaN(sec) || sec <= 0) return '00:00';
@@ -299,13 +303,61 @@ export const KaraokeHUD: React.FC<KaraokeHUDProps> = React.memo(({
           </div>
         </div>
 
-        {/* Right: Menu Options */}
-        <button
-          className="p-1.5 rounded-full hover:bg-white/10 text-zinc-300 hover:text-white transition-colors cursor-pointer"
-          title="Options"
-        >
-          <MoreVertical size={18} />
-        </button>
+        {/* Right: 3-Way Mode Segmented Control & Menu Options */}
+        <div className="flex items-center gap-2 shrink-0">
+          {onViewModeChange && (
+            <div className="flex items-center bg-zinc-900/90 border border-zinc-800 rounded-full p-0.5 shadow-inner">
+              <button
+                type="button"
+                onClick={() => onViewModeChange('video')}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'video'
+                    ? 'bg-cyan-600 text-white shadow-sm shadow-cyan-500/50'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+                title="โหมดวิดีโอเต็มจอ (Video 100%)"
+              >
+                <Video size={12} />
+                <span>Video</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onViewModeChange('stage')}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'stage'
+                    ? 'bg-purple-600 text-white shadow-sm shadow-purple-500/50'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+                title="โหมดกราฟคะแนนเต็มจอ (Score 100%)"
+              >
+                <Activity size={12} />
+                <span>Score</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onViewModeChange('hybrid')}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  viewMode === 'hybrid'
+                    ? 'bg-amber-500 text-zinc-950 shadow-sm shadow-amber-500/50 font-extrabold'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
+                }`}
+                title="โหมดผสม: วิดีโอ 70% + กราฟคะแนน 30% (Hybrid 70/30)"
+              >
+                <Layers size={12} />
+                <span>Hybrid</span>
+              </button>
+            </div>
+          )}
+
+          <button
+            className="p-1.5 rounded-full hover:bg-white/10 text-zinc-300 hover:text-white transition-colors cursor-pointer"
+            title="Options"
+          >
+            <MoreVertical size={18} />
+          </button>
+        </div>
       </div>
 
       {/* 2. Sub Status Bar: Recording Time (Left), Pitch Notes/Hit Badge (Center), Song Duration (Right) */}

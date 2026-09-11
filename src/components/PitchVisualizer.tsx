@@ -13,6 +13,7 @@ interface PitchVisualizerProps {
   transposeKey?: number;
   bpm?: number;
   isPlaying?: boolean;
+  targetPitchFrame?: PitchFrame | null;
 }
 
 interface TargetNoteBlock {
@@ -54,6 +55,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
   transposeKey = 0,
   bpm = 120,
   isPlaying = false,
+  targetPitchFrame = null,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -164,7 +166,9 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       const currentT = currentTimeSecRef.current;
       const currentTrack = vocalRefTrackRef.current;
       let targetHz = 0;
-      if (currentTrack?.analysis?.pitch_frames && currentTrack.analysis.pitch_frames.length > 0) {
+      if (targetPitchFrame && targetPitchFrame.is_voiced && targetPitchFrame.frequency_hz > 0) {
+        targetHz = getTransposedHz(targetPitchFrame.frequency_hz);
+      } else if (currentTrack?.analysis?.pitch_frames && currentTrack.analysis.pitch_frames.length > 0) {
         const frames = currentTrack.analysis.pitch_frames;
         const timeMs = currentT * 1000;
         const firstTime = frames[0].timestamp_ms;
@@ -220,7 +224,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
         }
       }
     }
-  }, [liveMicFrame, isPlaying]);
+  }, [liveMicFrame, isPlaying, targetPitchFrame]);
 
   const lastSizeRef = useRef<{ width: number; height: number; dpr: number }>({ width: 0, height: 0, dpr: 0 });
 
@@ -359,9 +363,10 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       });
     }
 
-    // 4. Draw Live Microphone Pitch Trail
+    // 4. Draw Live Microphone Pitch Trail (Optimized: Zero shadowBlur inside loop for steady 60FPS)
     if (livePitchHistoryRef.current.length > 0) {
       const pts = livePitchHistoryRef.current;
+      ctx.shadowBlur = 0;
       for (let i = 0; i < pts.length; i++) {
         const pt = pts[i];
         if (pt.timeSec < startTimeSec - 0.5 || pt.timeSec > startTimeSec + visibleDuration + 0.5) continue;
@@ -370,15 +375,12 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
         const y = hzToY(pt.hz);
 
         if (x >= 45 && x <= width + 10) {
-          ctx.shadowColor = pt.color;
-          ctx.shadowBlur = 8;
           ctx.fillStyle = pt.color;
           ctx.beginPath();
-          ctx.arc(x, y, 4, 0, Math.PI * 2);
+          ctx.arc(x, y, 3.5, 0, Math.PI * 2);
           ctx.fill();
         }
       }
-      ctx.shadowBlur = 0;
     }
 
     // 5. Draw Laser Playhead & Spark Particle Explosion (Matching Image 2)
@@ -404,6 +406,8 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
       let activeY = height / 2;
       if (liveMicFrame && liveMicFrame.is_voiced && liveMicFrame.frequency_hz > 0) {
         activeY = hzToY(liveMicFrame.frequency_hz);
+      } else if (targetPitchFrame && targetPitchFrame.is_voiced && targetPitchFrame.frequency_hz > 0) {
+        activeY = hzToY(getTransposedHz(targetPitchFrame.frequency_hz));
       } else if (vocalRefTrack?.analysis?.pitch_frames && vocalRefTrack.analysis.pitch_frames.length > 0) {
         const frames = vocalRefTrack.analysis.pitch_frames;
         const timeMs = currentTimeSec * 1000;
@@ -462,6 +466,7 @@ export const PitchVisualizer: React.FC<PitchVisualizerProps> = React.memo(({
     startTimeSec,
     isRecording,
     liveMicFrame,
+    targetPitchFrame,
     transposeKey,
     bpm,
     isPlaying,
